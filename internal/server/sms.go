@@ -145,6 +145,9 @@ func (s *Server) dispatchMessages(ctx context.Context) {
 		return
 	}
 	for _, raw := range rows {
+		if ctx.Err() != nil {
+			return
+		}
 		var req Request
 		if json.Unmarshal(raw, &req) != nil {
 			continue
