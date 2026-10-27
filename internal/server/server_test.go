@@ -235,7 +235,7 @@ func TestTerminalHistoryDoesNotBlockAdmission(t *testing.T) {
 		q.Jobs[key] = Job{ID: key, Domain: "old.example", State: "completed", Updated: time.Now()}
 	}
 	s.db.Update(context.Background(), "queue", func(json.RawMessage) (any, error) { return q, nil })
-	w := perform(s, "POST", "/api/v1/scans", `{"domain":"new.example"}`)
+	w := perform(s, "POST", "/api/v1/scans", `{"domain":"new.example.com"}`)
 	if w.Code != 202 {
 		t.Fatal(w.Code, w.Body.String())
 	}
