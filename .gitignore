@@ -1,0 +1,8 @@
+.env
+.env.*
+!.env.example
+.data/
+bin/
+infra/.pulumi/
+*.test
+coverage.out
