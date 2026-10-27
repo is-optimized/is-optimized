@@ -226,3 +226,17 @@ func TestStaleWorkerCannotPublish(t *testing.T) {
 		t.Fatal("stale report published")
 	}
 }
+
+func TestTerminalHistoryDoesNotBlockAdmission(t *testing.T) {
+	s, _, _ := setup(t)
+	q := Queue{Jobs: map[string]Job{}}
+	for i := 0; i < 64; i++ {
+		key := id()
+		q.Jobs[key] = Job{ID: key, Domain: "old.example", State: "completed", Updated: time.Now()}
+	}
+	s.db.Update(context.Background(), "queue", func(json.RawMessage) (any, error) { return q, nil })
+	w := perform(s, "POST", "/api/v1/scans", `{"domain":"new.example"}`)
+	if w.Code != 202 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+}

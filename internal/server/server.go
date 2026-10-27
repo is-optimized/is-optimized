@@ -199,8 +199,22 @@ func (s *Server) createScan(w http.ResponseWriter, r *http.Request) {
 				delete(q.Jobs, k)
 			}
 		}
-		if len(q.Jobs) >= 64 {
-			return nil, errConflict
+		// Terminal history must not consume the bounded active queue.
+		for len(q.Jobs) >= 64 {
+			oldest := ""
+			var at time.Time
+			for k, j := range q.Jobs {
+				if j.State == "completed" || j.State == "failed" {
+					if oldest == "" || j.Updated.Before(at) {
+						oldest = k
+						at = j.Updated
+					}
+				}
+			}
+			if oldest == "" {
+				return nil, errConflict
+			}
+			delete(q.Jobs, oldest)
 		}
 		job = Job{ID: id(), Domain: domain, State: "queued", Created: now, Updated: now}
 		q.Jobs[job.ID] = job
@@ -236,17 +250,33 @@ func (s *Server) scanStatus(w http.ResponseWriter, r *http.Request) {
 	jsonOut(w, 200, map[string]any{"id": j.ID, "state": j.State, "error": j.Error})
 }
 func (s *Server) Run(ctx context.Context) {
+	// A single independently scheduled message worker bounds provider traffic
+	// without allowing SMS latency to delay scan admission/recovery.
+	messageDone := make(chan struct{})
+	go func() {
+		defer close(messageDone)
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				s.dispatchMessages(ctx)
+			}
+		}
+	}()
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			s.wg.Wait()
+			<-messageDone
 			return
 		case <-ticker.C:
 			s.recoverPublishing(ctx)
 			s.dispatch(ctx)
-			s.dispatchMessages(ctx)
 		}
 	}
 }
