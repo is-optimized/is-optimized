@@ -19,12 +19,19 @@ import (
 	"github.com/is-optimized/is-optimized/internal/store"
 )
 
-type fakeScanner struct{ calls int }
+type fakeScanner struct {
+	calls  int
+	domain string
+}
 
 func (f *fakeScanner) Scan(context.Context, string) (reportmodel.Report, error) {
 	f.calls++
 	n := 75.0
-	return reportmodel.Report{Domain: "example.com", StartedAt: time.Now(), CompletedAt: time.Now(), MethodologyVersion: scanner.MethodologyVersion, Pages: []reportmodel.Page{{URL: "https://example.com", StatusCode: 200}}, Pillars: []reportmodel.Pillar{{ID: "seo", Name: "SEO", Score: &n, Coverage: 1}}, Findings: []reportmodel.Finding{{ID: "title", Pillar: "seo", Title: "Title", Status: "fail", Evidence: "<script>alert(1)</script>", Remediation: "Add a descriptive title"}}}, nil
+	domain := f.domain
+	if domain == "" {
+		domain = "example.com"
+	}
+	return reportmodel.Report{Domain: domain, StartedAt: time.Now(), CompletedAt: time.Now(), MethodologyVersion: scanner.MethodologyVersion, Pages: []reportmodel.Page{{URL: "https://example.com", StatusCode: 200}}, Pillars: []reportmodel.Pillar{{ID: "seo", Name: "SEO", Score: &n, Coverage: 1}}, Findings: []reportmodel.Finding{{ID: "title", Pillar: "seo", Title: "Title", Status: "fail", Evidence: "<script>alert(1)</script>", Remediation: "Add a descriptive title"}}}, nil
 }
 
 type fakeSender struct {
@@ -315,5 +322,43 @@ func TestSMSNameAndDisabledBoundary(t *testing.T) {
 	}
 	if w = perform(s, "GET", "/assets/nope.svg", ""); w.Code != 404 {
 		t.Fatal("asset route exposed unknown content")
+	}
+}
+
+func TestSMSHexadecimalDomainCorrelation(t *testing.T) {
+	s, scan, sender := setup(t)
+	scan.domain = strings.Repeat("a", 36) + ".com"
+	s.cfg.SMSWording = ApprovedRequestWording + "\nReport code: {token}"
+	key := completed(t, s)
+	w := perform(s, "POST", "/api/v1/report-requests", `{"report_id":"`+key+`"}`)
+	if w.Code != 201 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	var handoff map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &handoff); err != nil {
+		t.Fatal(err)
+	}
+	if len(tokenPattern.FindAllString(handoff["body"], -1)) != 2 {
+		t.Fatal("fixture must contain both domain label and correlation token")
+	}
+	form := url.Values{"AccountSid": {"ACtest"}, "From": {"+15555550123"}, "To": {s.cfg.TwilioFrom}, "MessageSid": {"SMhex"}, "Body": {handoff["body"] + " altered"}}
+	signed(s, "/webhooks/twilio/inbound", form)
+	s.dispatchMessages(context.Background())
+	if sender.calls != 0 {
+		t.Fatal("altered message accepted")
+	}
+	form.Set("Body", handoff["body"])
+	if w = signed(s, "/webhooks/twilio/inbound", form); w.Code != 200 {
+		t.Fatal(w.Code)
+	}
+	s.dispatchMessages(context.Background())
+	if sender.calls != 1 {
+		t.Fatal("valid hexadecimal domain did not receive one reply")
+	}
+	form.Set("MessageSid", "SMhex-duplicate")
+	signed(s, "/webhooks/twilio/inbound", form)
+	s.dispatchMessages(context.Background())
+	if sender.calls != 1 {
+		t.Fatal("correlation was consumed twice")
 	}
 }
