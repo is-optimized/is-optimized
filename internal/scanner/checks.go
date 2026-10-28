@@ -203,6 +203,7 @@ func evaluate(p pageResult) []reportmodel.Finding {
 	h1, emptyH1, skipped, previousLevel := 0, 0, 0, 0
 	viewport := false
 	canonCount := 0
+	canonicalValues := map[string]bool{}
 	images, missingAlt, controls, unnamed, links, emptyLinks := 0, 0, 0, 0, 0, 0
 	heading, structured, main, nav, article, author, dated, entity := false, false, false, false, false, false, false, false
 	var visible strings.Builder
@@ -274,7 +275,7 @@ func evaluate(p pageResult) []reportmodel.Finding {
 					}
 				}
 			case "description":
-				description = attr(n, "content")
+				description = strings.TrimSpace(attr(n, "content"))
 			case "robots":
 				robotsMeta = attr(n, "content")
 			case "author":
@@ -284,6 +285,7 @@ func evaluate(p pageResult) []reportmodel.Finding {
 			if hasToken(attr(n, "rel"), "canonical") {
 				canonical = attr(n, "href")
 				canonCount++
+				canonicalValues[canonical] = true
 			}
 		case "img":
 			images++
@@ -383,7 +385,11 @@ func evaluate(p pageResult) []reportmodel.Finding {
 			u, e := url.Parse(canonical)
 			if canonCount != 1 || e != nil || !u.IsAbs() || validateURL(u) != nil {
 				f.Status = "partial"
-				f.Evidence = "Expected one absolute HTTP(S) canonical reference; observed " + fmt.Sprint(canonCount)
+				f.Evidence = fmt.Sprintf("Expected one absolute public HTTP(S) canonical; observed %d declarations, %d distinct targets. Last target: %s", canonCount, len(canonicalValues), excerpt(canonical))
+				if len(canonicalValues) > 1 {
+					f.Evidence = "Conflicting HTML canonical targets. " + f.Evidence
+				}
+				f.Evidence = excerpt(f.Evidence)
 			} else if canonical != p.page.URL {
 				f.Evidence += "; differs from fetched URL; may be intentional, target not fetched"
 			}
