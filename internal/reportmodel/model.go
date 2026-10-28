@@ -15,10 +15,11 @@ type Report struct {
 	Pillars            []Pillar  `json:"pillars"`
 }
 type Page struct {
-	URL        string `json:"url"`
-	StatusCode int    `json:"status_code"`
-	Error      string `json:"error,omitempty"`
-	DurationMS int64  `json:"duration_ms"`
+	RequestedURL string `json:"requested_url,omitempty"`
+	URL          string `json:"url"`
+	StatusCode   int    `json:"status_code"`
+	Error        string `json:"error,omitempty"`
+	DurationMS   int64  `json:"duration_ms"`
 }
 type Finding struct {
 	ID           string  `json:"id"`

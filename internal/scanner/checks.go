@@ -18,10 +18,11 @@ type pageResult struct {
 	page         reportmodel.Page
 	doc          *html.Node
 	headerRobots string
+	hsts         string
 }
 
 func analyze(r response, err error, requested string, duration time.Duration) pageResult {
-	p := pageResult{page: reportmodel.Page{URL: requested, StatusCode: r.code, DurationMS: duration.Milliseconds()}}
+	p := pageResult{page: reportmodel.Page{URL: requested, RequestedURL: requested, StatusCode: r.code, DurationMS: duration.Milliseconds()}}
 	if r.url != nil {
 		p.page.URL = r.url.String()
 	}
@@ -85,6 +86,7 @@ func analyze(r response, err error, requested string, duration time.Duration) pa
 		})
 	}
 	p.headerRobots = r.header.Get("X-Robots-Tag")
+	p.hsts = r.header.Get("Strict-Transport-Security")
 	return p
 }
 func attr(n *html.Node, key string) string {
@@ -181,6 +183,8 @@ func Registry() []Check {
 		{"seo.title", "seo", "Page title", "Give this page a concise, descriptive title that distinguishes its purpose.", 2, false},
 		{"seo.description", "seo", "Search description", "Write an accurate page-specific meta description; do not promise that search engines will display it.", 1, false},
 		{"seo.canonical", "seo", "Canonical reference", "Provide one valid canonical URL that reflects the intended public version of this page.", 1, false},
+		{"seo.headings", "seo", "Heading structure", "Provide a meaningful H1 and use heading levels in a logical sequence.", 1, false},
+		{"seo.viewport", "seo", "Mobile viewport declaration", "Declare a viewport with width=device-width; verify actual mobile layout separately.", 1, false},
 		{"seo.images", "seo", "Image text alternatives", "Provide useful alternatives for informative images and empty alt attributes for decorative images.", 1, false},
 		{"geo.access", "geo", "Extractable public response", "Expose intended public information in server-delivered HTML.", 3, true},
 		{"geo.entity", "geo", "Structured entity data", "Add accurate, applicable Schema.org JSON-LD based on verified business or content facts.", 2, false},
@@ -196,6 +200,8 @@ func evaluate(p pageResult) []reportmodel.Finding {
 	registry := Registry()
 	out := make([]reportmodel.Finding, 0, len(registry))
 	var title, description, robotsMeta, canonical string
+	h1, emptyH1, skipped, previousLevel := 0, 0, 0, 0
+	viewport := false
 	canonCount := 0
 	images, missingAlt, controls, unnamed, links, emptyLinks := 0, 0, 0, 0, 0, 0
 	heading, structured, main, nav, article, author, dated, entity := false, false, false, false, false, false, false, false
@@ -260,6 +266,13 @@ func evaluate(p pageResult) []reportmodel.Finding {
 			title = text(n)
 		case "meta":
 			switch strings.ToLower(attr(n, "name")) {
+			case "viewport":
+				for _, part := range strings.FieldsFunc(strings.ToLower(attr(n, "content")), func(r rune) bool { return r == ',' || r == ';' }) {
+					pair := strings.SplitN(part, "=", 2)
+					if len(pair) == 2 && strings.TrimSpace(pair[0]) == "width" && strings.TrimSpace(pair[1]) == "device-width" {
+						viewport = true
+					}
+				}
 			case "description":
 				description = attr(n, "content")
 			case "robots":
@@ -268,7 +281,7 @@ func evaluate(p pageResult) []reportmodel.Finding {
 				author = attr(n, "content") != ""
 			}
 		case "link":
-			if strings.EqualFold(attr(n, "rel"), "canonical") {
+			if hasToken(attr(n, "rel"), "canonical") {
 				canonical = attr(n, "href")
 				canonCount++
 			}
@@ -284,6 +297,17 @@ func evaluate(p pageResult) []reportmodel.Finding {
 				missingAlt++
 			}
 		case "h1", "h2", "h3", "h4", "h5", "h6":
+			level := int(n.Data[1] - '0')
+			if level == 1 {
+				h1++
+				if text(n) == "" {
+					emptyH1++
+				}
+			}
+			if previousLevel > 0 && level > previousLevel+1 {
+				skipped++
+			}
+			previousLevel = level
 			if text(n) != "" {
 				heading = true
 			}
@@ -360,6 +384,21 @@ func evaluate(p pageResult) []reportmodel.Finding {
 			if canonCount != 1 || e != nil || !u.IsAbs() || validateURL(u) != nil {
 				f.Status = "partial"
 				f.Evidence = "Expected one absolute HTTP(S) canonical reference; observed " + fmt.Sprint(canonCount)
+			} else if canonical != p.page.URL {
+				f.Evidence += "; differs from fetched URL; may be intentional, target not fetched"
+			}
+		case "seo.headings":
+			f.Evidence = fmt.Sprintf("%d H1 elements; %d empty H1s; %d upward level skips in document order", h1, emptyH1, skipped)
+			if h1 == 0 || emptyH1 == h1 {
+				f.Status = "fail"
+			} else if emptyH1 > 0 || skipped > 0 {
+				f.Status = "partial"
+			}
+		case "seo.viewport":
+			f.Evidence = "Viewport width=device-width observed; responsive rendering not tested"
+			if !viewport {
+				f.Status = "partial"
+				f.Evidence = "No viewport declaring width=device-width observed"
 			}
 		case "seo.images":
 			f.Evidence = fmt.Sprintf("%d of %d images have an alt attribute; semantic accuracy not verified", images-missingAlt, images)
@@ -415,6 +454,18 @@ func evaluate(p pageResult) []reportmodel.Finding {
 		}
 		out = append(out, f)
 	}
+	out = append(out, reportmodel.Finding{ID: "seo.words", Pillar: "seo", Title: "Initial HTML word count", Status: observationStatus(p), URL: p.page.URL, Evidence: wordEvidence(p, visible.String())})
+	evidence := "HSTS header absent on HTTPS response; security observation, no score penalty"
+	if p.hsts != "" {
+		evidence = "HSTS header observed (policy not validated): " + excerpt(p.hsts)
+	}
+	if u, _ := url.Parse(p.page.URL); u == nil || u.Scheme != "https" {
+		evidence = "HSTS not assessed on a non-HTTPS URL"
+	}
+	if p.page.Error != "" {
+		evidence = p.page.Error
+	}
+	out = append(out, reportmodel.Finding{ID: "seo.hsts", Pillar: "seo", Title: "HTTPS transport policy", Status: observationStatus(p), URL: p.page.URL, Evidence: evidence})
 	return out
 }
 func hasType(v any, kind string) bool {
