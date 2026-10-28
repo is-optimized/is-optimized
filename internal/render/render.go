@@ -2,25 +2,57 @@ package render
 
 import (
 	"bytes"
+	_ "embed"
 	"fmt"
 	"html/template"
 	"io"
+	"sort"
 	"strings"
 
 	"github.com/go-pdf/fpdf"
 	"github.com/is-optimized/is-optimized/internal/reportmodel"
+	"golang.org/x/image/font/gofont/gobold"
 	"golang.org/x/image/font/gofont/goregular"
 )
 
-const Style = `:root{color-scheme:light}*{box-sizing:border-box}body{margin:0;background:#f9f8f4;color:#1e1f22;font:17px/1.6 system-ui,sans-serif}main{max-width:1000px;margin:auto;padding:32px 24px}a{color:#286273}header{border-bottom:1px solid #ddd;padding:16px 0}h1{font-size:clamp(2.3rem,6vw,4rem);line-height:1.1;letter-spacing:-.04em}h2{line-height:1.2}section,.card{background:white;border:1px solid #deded8;border-radius:12px;padding:24px;margin:20px 0}.scores{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:16px}.score{font-size:2.5rem;font-weight:700}input,button,.button{font:inherit;padding:12px 18px;border-radius:6px;border:1px solid #777}input{max-width:100%;background:white}button,.button{display:inline-block;background:#286273;color:white;cursor:pointer;text-decoration:none}button:disabled{opacity:.6}.secondary{background:transparent;color:#286273}.muted{color:#565b5c;font-size:.9rem}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f3f3ef;padding:16px}code{overflow-wrap:anywhere}label{display:block;margin:12px 0}table{width:100%;border-collapse:collapse}td,th{text-align:left;vertical-align:top;padding:8px;border-bottom:1px solid #ddd}a,td{overflow-wrap:anywhere}.status{font-weight:bold;text-transform:uppercase;font-size:.8rem}@media print{.actions{display:none}body{background:white}section{break-inside:avoid}main{padding:0}a{color:inherit}}`
-
-var funcs = template.FuncMap{"score": func(v *float64) string {
+var funcs = template.FuncMap{"statusLabel": statusLabel, "score": func(v *float64) string {
 	if v == nil {
 		return "Insufficient evidence"
 	}
 	return fmt.Sprintf("%.0f / 100", *v)
 }, "coverage": func(v float64) string { return fmt.Sprintf("%.0f%%", v*100) }}
-var reportTemplate = template.Must(template.New("report").Funcs(funcs).Parse(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>{{.Report.Domain}} — is-optimized.com</title><style>{{.CSS}}</style></head><body><main><header><a href="/">is-optimized.com</a> · A product of Sire Run, Inc.</header><h1>Your website readiness report</h1><p>{{.Report.Domain}}</p><p class="muted">Observed {{.Report.CompletedAt}} · {{len .Report.Pages}} selected pages · methodology {{.Report.MethodologyVersion}}</p><p>This is a bounded technical assessment, not a ranking prediction or proof that an AI agent can complete a task.</p><div class="scores">{{range .Report.Pillars}}<section><h2>{{.Name}}</h2><p class="score">{{score .Score}}</p><p>Evidence coverage: {{coverage .Coverage}}</p></section>{{end}}</div><p class="actions"><a class="button" href="/reports/{{.Report.ID}}/pdf">Printable PDF</a></p><h2>Findings and fixes</h2>{{range .Report.Findings}}<section><span class="status">{{.Status}} · {{.Pillar}}</span><h3>{{.Title}}</h3><p><code>{{.URL}}</code></p><p><strong>Evidence:</strong> {{.Evidence}}</p><p><strong>Next step:</strong> {{.Remediation}}</p></section>{{end}}<section><h2>Give this to your coding agent</h2><pre>{{.Prompt}}</pre></section><section><h2>Pages covered</h2><ul>{{range .Report.Pages}}<li>{{.URL}} — HTTP {{.StatusCode}}{{if .Error}} · {{.Error}}{{end}}</li>{{end}}</ul><p>Homepage plus up to four directly linked pages. No deeper crawl or JavaScript execution.</p></section><footer><p>Prepared by Sire Run, Inc. · is-optimized.com</p><p class="muted">Report {{.Report.ID}}. Public report: do not include personal or confidential information when sharing.</p></footer></main></body></html>`))
+
+//go:embed report.html
+var reportHTML string
+
+var reportTemplate = template.Must(template.New("report").Funcs(funcs).Parse(reportHTML))
+
+func statusLabel(status string) string {
+	switch status {
+	case "fail":
+		return "Needs attention"
+	case "partial":
+		return "Room to improve"
+	case "unknown":
+		return "Not observed"
+	case "pass":
+		return "Observed pass"
+	case "not_applicable":
+		return "Not applicable"
+	case "information":
+		return "For context"
+	default:
+		return status
+	}
+}
+
+// Order a copy for presentation; never change immutable evidence or scores.
+func ordered(r reportmodel.Report) reportmodel.Report {
+	r.Findings = append([]reportmodel.Finding(nil), r.Findings...)
+	priority := map[string]int{"fail": 0, "partial": 1, "unknown": 2, "pass": 3, "not_applicable": 4, "information": 5}
+	sort.SliceStable(r.Findings, func(i, j int) bool { return priority[r.Findings[i].Status] < priority[r.Findings[j].Status] })
+	return r
+}
 
 func Prompt(r reportmodel.Report) string {
 	var b bytes.Buffer
@@ -34,6 +66,7 @@ func Prompt(r reportmodel.Report) string {
 	return b.String()
 }
 func HTML(w io.Writer, r reportmodel.Report) error {
+	r = ordered(r)
 	return reportTemplate.Execute(w, struct {
 		Report reportmodel.Report
 		CSS    template.CSS
@@ -41,50 +74,159 @@ func HTML(w io.Writer, r reportmodel.Report) error {
 	}{r, template.CSS(Style), Prompt(r)})
 }
 func PDF(r reportmodel.Report) ([]byte, error) {
+	r = ordered(r)
 	p := fpdf.New("P", "mm", "A4", "")
-	p.SetMargins(18, 18, 18)
-	p.SetAutoPageBreak(true, 20)
+	p.SetMargins(18, 25, 18)
+	p.SetAutoPageBreak(true, 22)
 	p.AddUTF8FontFromBytes("Go", "", goregular.TTF)
+	p.AddUTF8FontFromBytes("Go", "B", gobold.TTF)
 	p.SetTitle("Website readiness: "+r.Domain, false)
 	p.SetAuthor("Sire Run, Inc.", false)
+	p.AliasNbPages("")
+	p.SetHeaderFunc(func() {
+		p.SetFillColor(32, 95, 89)
+		p.Rect(18, 10, 8, 8, "F")
+		p.SetDrawColor(250, 247, 239)
+		p.SetLineWidth(.5)
+		p.Line(20.8, 12, 19.8, 12)
+		p.Line(19.8, 12, 19.8, 16)
+		p.Line(19.8, 16, 20.8, 16)
+		p.Line(23.2, 12, 24.2, 12)
+		p.Line(24.2, 12, 24.2, 16)
+		p.Line(24.2, 16, 23.2, 16)
+		p.Line(21.2, 14.7, 21.8, 15.3)
+		p.Line(21.8, 15.3, 23.2, 13.3)
+		p.SetFillColor(213, 233, 191)
+		p.Circle(21.8, 12.7, .33, "F")
+		p.SetXY(29, 10)
+		p.SetTextColor(37, 42, 39)
+		p.SetFont("Go", "B", 13)
+		p.Cell(95, 8, "is-optimized.")
+		p.SetFont("Go", "", 8)
+		p.SetTextColor(89, 98, 91)
+		p.CellFormat(58, 8, "WEBSITE READINESS", "", 0, "R", false, 0, "")
+		p.SetDrawColor(214, 217, 206)
+		p.Line(18, 21, 192, 21)
+		p.SetY(27)
+	})
+	p.SetFooterFunc(func() {
+		p.SetY(-17)
+		p.SetDrawColor(214, 217, 206)
+		p.Line(18, p.GetY(), 192, p.GetY())
+		p.SetFont("Go", "", 8)
+		p.SetTextColor(89, 98, 91)
+		p.CellFormat(145, 8, "Sire Run, Inc. · is-optimized.com", "", 0, "L", false, 0, "")
+		p.CellFormat(29, 8, fmt.Sprintf("%d / {nb}", p.PageNo()), "", 0, "R", false, 0, "")
+	})
+	line := func(s string) { p.MultiCell(0, 5.5, s, "", "L", false); p.Ln(2) }
+	heading := func(label, title string) {
+		if p.GetY() > 245 {
+			p.AddPage()
+		}
+		p.Ln(5)
+		p.SetTextColor(32, 95, 89)
+		p.SetFont("Go", "B", 9)
+		line(label)
+		p.SetTextColor(37, 42, 39)
+		p.SetFont("Go", "B", 18)
+		p.MultiCell(0, 8, title, "", "L", false)
+		p.Ln(4)
+		p.SetFont("Go", "", 10)
+	}
 	p.AddPage()
-	p.SetFont("Go", "", 22)
-	p.MultiCell(0, 11, "Website readiness report", "", "L", false)
-	p.SetFont("Go", "", 12)
-	line := func(s string) { p.MultiCell(0, 6, s, "", "L", false); p.Ln(3) }
+	p.SetTextColor(32, 95, 89)
+	p.SetFont("Go", "B", 9)
+	line("A CLEARER PICTURE. USEFUL NEXT STEPS.")
+	p.SetTextColor(37, 42, 39)
+	p.SetFont("Go", "B", 28)
+	p.MultiCell(0, 12, "Your website\nreadiness report", "", "L", false)
+	p.Ln(5)
+	p.SetFont("Go", "", 16)
 	line(r.Domain)
-	line("Prepared by Sire Run, Inc. | is-optimized.com")
-	line("Report: " + r.ID + " | Methodology: " + r.MethodologyVersion)
-	line("Observed: " + r.CompletedAt.UTC().Format("2006-01-02 15:04 UTC"))
-	line("Bounded technical signals; no ranking, citation, or transaction guarantee.")
+	p.SetFont("Go", "", 9)
+	p.SetTextColor(89, 98, 91)
+	line("Observed " + r.CompletedAt.UTC().Format("02 Jan 2006 · 15:04 UTC"))
+	line(fmt.Sprintf("%d selected pages · Methodology %s", len(r.Pages), r.MethodologyVersion))
+	p.Ln(5)
 	for _, v := range r.Pillars {
+		if p.GetY() > 239 {
+			p.AddPage()
+		}
+		p.SetFillColor(237, 241, 233)
+		p.SetTextColor(32, 95, 89)
+		p.SetFont("Go", "B", 11)
+		p.CellFormat(0, 10, "  "+v.Name, "", 1, "L", true, 0, "")
+		p.SetTextColor(37, 42, 39)
+		p.SetFont("Go", "", 17)
 		score := "Insufficient evidence"
 		if v.Score != nil {
-			score = fmt.Sprintf("%.0f/100", *v.Score)
+			score = fmt.Sprintf("%.0f / 100", *v.Score)
 		}
-		line(fmt.Sprintf("%s: %s (coverage %.0f%%)", v.Name, score, 100*v.Coverage))
+		p.CellFormat(0, 11, "  "+score, "", 1, "L", true, 0, "")
+		p.SetFont("Go", "", 9)
+		p.SetTextColor(89, 98, 91)
+		p.CellFormat(0, 8, fmt.Sprintf("    Evidence coverage: %.0f%%", 100*v.Coverage), "", 1, "L", true, 0, "")
+		p.Ln(4)
 	}
+	p.SetTextColor(37, 42, 39)
+	p.SetFont("Go", "", 10)
+	line("Scores describe observed technical signals, not rankings, AI citations, revenue, or successful AI tasks. Coverage is the share of applicable evidence we could check. Insufficient evidence is not a zero.")
+	line("A focused snapshot: homepage plus up to four direct links, without deeper crawling or JavaScript execution. HTML and PDF use the same saved evidence.")
+	p.AddPage()
+	heading("01 / FINDINGS & FIXES", "Start with what needs attention.")
+	line("Fixes first, then evidence gaps, passing checks, and context. Confirm each finding in your site's source before making changes.")
 	for _, f := range r.Findings {
-		p.SetFont("Go", "", 14)
-		line(f.Title + " — " + f.Status)
-		p.SetFont("Go", "", 10)
+		if p.GetY() > 231 {
+			p.AddPage()
+		}
+		p.Ln(4)
+		p.SetDrawColor(214, 217, 206)
+		p.Line(18, p.GetY(), 192, p.GetY())
+		p.Ln(4)
+		p.SetTextColor(32, 95, 89)
+		p.SetFont("Go", "B", 8)
+		line(strings.ToUpper(statusLabel(f.Status)) + " · " + f.Pillar)
+		p.SetTextColor(37, 42, 39)
+		p.SetFont("Go", "B", 13)
+		line(f.Title)
+		p.SetFont("Go", "", 9)
+		p.SetTextColor(89, 98, 91)
 		line(f.URL)
 		if strings.HasPrefix(f.URL, "https://") || strings.HasPrefix(f.URL, "http://") {
+			p.SetTextColor(32, 95, 89)
 			p.WriteLinkString(5, "Open evidence page", f.URL)
 			p.Ln(7)
 		}
-		line("Evidence: " + f.Evidence)
+		p.SetTextColor(37, 42, 39)
+		p.SetFont("Go", "", 10)
+		line("What we observed: " + f.Evidence)
 		line("Next step: " + f.Remediation)
 	}
 	p.AddPage()
-	p.SetFont("Go", "", 16)
-	line("Coding-agent instructions")
-	p.SetFont("Go", "", 10)
+	heading("02 / PUT IT TO WORK", "A brief for your developer or coding agent.")
+	p.SetFont("Go", "", 9)
 	line(Prompt(r))
-	line("Pages covered (homepage plus at most four direct links):")
+	heading("03 / SCOPE & PROVENANCE", "The pages behind the picture.")
 	for _, pg := range r.Pages {
-		line(fmt.Sprintf("%s — HTTP %d %s", pg.URL, pg.StatusCode, pg.Error))
+		response := fmt.Sprintf("HTTP %d", pg.StatusCode)
+		if pg.StatusCode == 0 {
+			response = "No HTTP response recorded"
+		}
+		line(pg.URL + " — " + response)
+		if pg.Error != "" {
+			line("Observation limit: " + pg.Error)
+		}
 	}
+	p.SetFont("Go", "", 9)
+	line("Page selection: " + r.SelectionPolicy + ". Selected pages can include failed requests; a listed page is not necessarily fully observed.")
+	line("Report: " + r.ID + " | Methodology: " + r.MethodologyVersion)
+	line("Public report. Share only where appropriate.")
+	p.SetTextColor(32, 95, 89)
+	p.WriteLinkString(5, "Privacy Policy", "https://sire.run/privacy/")
+	p.Write(5, "  ·  ")
+	p.WriteLinkString(5, "Terms & Conditions", "https://sire.run/terms/")
+	p.Ln(7)
+	p.WriteLinkString(5, "Contact: privacy@sire.run", "mailto:privacy@sire.run")
 	var out bytes.Buffer
 	e := p.Output(&out)
 	return out.Bytes(), e
