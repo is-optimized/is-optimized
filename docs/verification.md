@@ -47,3 +47,13 @@ Coordinator acceptance after fresh authorization/admission:
 Owner feedback supersedes the editorial design and this lane's previous deployment assignment. Starting head: `48f54afe433f32d7669ba6ff8aebf8168cc6259c`, branch `design/astra-finish`. Astra owns design/frontend only; coordinator owns deployment. No cloud/auth/infra inspection or mutation, packaging, new implementation worker, capacity retry, heavy test/build, or browser binary is authorized in this continuation.
 
 Current acceptance adds the staged landing → indeterminate progress → optional SMS delivery → domain report path, a bounded real public directory, flat evidence rows/accordions, and minimal dark branding. See `docs/brand.md` and `docs/public-directory.md`. Static preview states are under `/Volumes/BuildOffload/artifacts/is-optimized-astra-minimal-20261027/preview/` and have synthetic-only preview labeling. They are not Go-rendered output or screenshots. Final Go tests, store integration, browser behavior, and PDF appearance remain held regardless of source review.
+
+## Compact consent/report continuation — 2026-10-27
+
+Starting head `736605259e86c555081169f2e5fe4b9b7622ff86` on `design/compact-consent-report` includes the coordinator's phone-field/binding fix. This lane changes only consent presentation/client US-number handling, report presentation/PDF source, rendering fixtures, and design evidence. Backend phone/signature/token/suppression tests are preserved; no scanner/methodology/weight, startup, infrastructure, auth, or packaging changes.
+
+Current static preview folder is `/Volumes/BuildOffload/artifacts/is-optimized-astra-report-20261027/preview/`; it includes enabled/disabled compact consent, handoff, all-three-score report, missing/withheld-pillar report, and `example.com/index.html`. Samples are clearly labeled synthetic in preview-only chrome. The interpreter is not Go template execution or browser acceptance.
+
+Prepared additional rendering fixtures protect actual zero versus nil versus absent pillars, all check-status counts, unclassified/excluded evidence preservation, deterministic foundational/status priority, immutable input, empty evidence, and unsafe affected-page link escaping. These are unrun. Existing phone-binding tests were not removed or changed.
+
+Required coordinator acceptance after fresh authorization/admission: final Go tests/vet/build, browser mobile/desktop consent validation and bypass, exact disclosure text/accessibility, matching-sender simulated flow, chart/text correspondence, clipboard/fallback, report accordions/print, and actual PDF generation/text extraction/links/pagination. No heavy execution, browser binary, admission retry, or fallback is permitted in this lane. Source review alone does not clear these gates.
