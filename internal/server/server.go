@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/netip"
@@ -423,6 +424,10 @@ func (s *Server) publish(ctx context.Context, j Job, snap Snapshot) {
 		}{j.ID, snap.Report.CompletedAt}, nil
 	}); e != nil {
 		return
+	}
+	// The public directory is a best-effort projection, never a scan gate.
+	if e := s.indexPublicReport(ctx, snap); e != nil {
+		slog.Warn("public report directory update unavailable")
 	}
 	s.db.Update(ctx, "queue", func(raw json.RawMessage) (any, error) {
 		var q Queue
