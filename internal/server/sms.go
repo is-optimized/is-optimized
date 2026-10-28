@@ -20,6 +20,7 @@ const ApprovedRequestWording = "Hi, please send me the free website audit report
 
 var phonePattern = regexp.MustCompile(`^\+[1-9][0-9]{7,14}$`)
 var tokenPattern = regexp.MustCompile(`\b[a-f0-9]{36}\b`)
+var correlationPattern = regexp.MustCompile(`(?:^|\n)Report code: ([a-f0-9]{36})$`)
 
 func (s *Server) requestReport(w http.ResponseWriter, r *http.Request) {
 	if !s.cfg.SMS {
@@ -105,12 +106,20 @@ func (s *Server) inbound(w http.ResponseWriter, r *http.Request) {
 		ack(w)
 		return
 	}
-	tokens := tokenPattern.FindAllString(body, -1)
-	if len(tokens) != 1 {
-		ack(w)
-		return
+	// Prefer our explicit trailing code: a domain itself may contain a
+	// 36-character hexadecimal label. Stored exact-message validation below
+	// still rejects altered requests. Retain legacy single-token wording.
+	var token string
+	if match := correlationPattern.FindStringSubmatch(body); len(match) == 2 {
+		token = match[1]
+	} else {
+		tokens := tokenPattern.FindAllString(body, -1)
+		if len(tokens) != 1 {
+			ack(w)
+			return
+		}
+		token = tokens[0]
 	}
-	token := tokens[0]
 	messageID := r.PostForm.Get("MessageSid")
 	if messageID == "" {
 		http.Error(w, "missing message ID", 400)
