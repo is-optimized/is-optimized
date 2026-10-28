@@ -41,3 +41,9 @@ Coordinator acceptance after fresh authorization/admission:
 3. Capture 1440px desktop, 390px and 320px mobile, and print/PDF pages. Check keyboard focus, 200% zoom, reduced motion, status announcements, overflow, empty/unknown scores, disabled SMS, and optional marketing. Inspect PDF text extraction, font embedding, page breaks, and actual links. Current static preview files help source review but do not satisfy these checks.
 4. Reconcile independent review with the final diff; resolve findings before merge. Preserve guarded merge and any required Wazi/project gates. The old blocked Wazi draft is not newly validated.
 5. Follow `deployment-candidate.md` for explicit project/budget, authentication/backend/resource identity, actual preview, image construction and Nanos boot qualification. Do not deploy a Linux-build-only artifact.
+
+## Minimal design continuation — 2026-10-27
+
+Owner feedback supersedes the editorial design and this lane's previous deployment assignment. Starting head: `48f54afe433f32d7669ba6ff8aebf8168cc6259c`, branch `design/astra-finish`. Astra owns design/frontend only; coordinator owns deployment. No cloud/auth/infra inspection or mutation, packaging, new implementation worker, capacity retry, heavy test/build, or browser binary is authorized in this continuation.
+
+Current acceptance adds the staged landing → indeterminate progress → optional SMS delivery → domain report path, a bounded real public directory, flat evidence rows/accordions, and minimal dark branding. See `docs/brand.md` and `docs/public-directory.md`. Static preview states are under `/Volumes/BuildOffload/artifacts/is-optimized-astra-minimal-20261027/preview/` and have synthetic-only preview labeling. They are not Go-rendered output or screenshots. Final Go tests, store integration, browser behavior, and PDF appearance remain held regardless of source review.
