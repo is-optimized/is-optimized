@@ -65,3 +65,18 @@ Candidate branch: `feat/seo-observations`, isolated worktree `/Volumes/BuildOffl
 Independent reviewer `/root/rfc_review` approved the exact base/head above with no actionable correctness or scoring-safety blockers. This was source-only review. `gofmt` and `git diff --check` passed. New fixture tests are prepared in `internal/scanner/observations_test.go` but have not run. No build-admission retry, tests, binary/image build, cloud operation, deployment, or provider send occurred in this continuation. The existing terminal memory-pressure refusal remains in force.
 
 Next authorized admission should execute the scanner fixtures first, then the existing integration/rendering gates above. Inspect the v2 findings in actual generated HTML and PDF, including duplicate affected pages, unobserved pages, and a changed canonical target. Methodology v1 reports remain immutable and must not be relabeled as v2. Do not merge or deploy this source candidate until required execution gates pass.
+
+## Authorized execution retry — 2026-10-28
+
+User explicitly requested retry. Source under test: `d20957d9bcdd9859b7e175db1e3d3565f6e74206` (code unchanged from independently approved `7a3a0c3572bc3c0d80cf2da341ca5839e08ed3fe`). Admission passed: load 3.72; idle 86.25% and 86.90%; pressure normal throughout; swap 0 and 0.011 MiB/s; no thermal/performance warnings. Exact acquired lease `0e887a8745a7fb96c83fdf7b2a2edde6ac1a0abf` was released successfully.
+
+Passed with `GOMAXPROCS=2`, external BuildOffload caches/tmp, `-p 1`, installed **Go 1.27.1 darwin/arm64**:
+
+- `go test -p 1 ./internal/scanner`
+- `go test -race -p 1 ./...`
+- `go vet -p 1 ./...`
+- `CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -p 1 -trimpath ./cmd/server` with artifact output.
+
+Artifact directory: `/Volumes/BuildOffload/artifacts/is-optimized-seo-retry-20261028`. Logs are `scanner.log`, `race.log`, `vet.log`, `build.log`; admission is `admission.json`. Static ELF SHA-256: `1cd96213b937a91907de8d541af992d74297c0a374bcd6d95c64529506a3e1b6`. Render fixtures generated HTML/PDF/JSON. PDF page 1 was visually inspected and showed legible scores, coverage, scope and action-list introduction without clipping; remaining pages and actual v2 end-to-end render visual acceptance are not claimed.
+
+This supersedes the local test/build hold above. It does not qualify the originally pinned Go 1.26.0 toolchain, Nanos packaging/boot, GCP runtime, live Twilio delivery, or full browser visual acceptance. No cloud resources were changed, SMS sent, branch merged, or deployment performed during this retry.
