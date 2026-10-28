@@ -8,10 +8,15 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/is-optimized/is-optimized/internal/messaging"
 	"github.com/is-optimized/is-optimized/internal/store"
 )
+
+// Approved request copy. Correlation is appended internally, never supplied by a visitor.
+const ApprovedRequestWording = "Hi, please send me the free website audit report for {domain}. My name is {name}."
 
 var phonePattern = regexp.MustCompile(`^\+[1-9][0-9]{7,14}$`)
 var tokenPattern = regexp.MustCompile(`\b[a-f0-9]{36}\b`)
@@ -24,19 +29,31 @@ func (s *Server) requestReport(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		ReportID  string `json:"report_id"`
 		Marketing bool   `json:"marketing"`
+		Name      string `json:"name"`
 	}
 	if decode(r, &in) != nil {
 		http.Error(w, "invalid request", 400)
 		return
 	}
-	if _, ok := s.load(w, r, in.ReportID); !ok {
+	snapshot, ok := s.load(w, r, in.ReportID)
+	if !ok {
 		return
 	}
 	if !s.allow(r) {
 		http.Error(w, "request limit reached", 429)
 		return
 	}
-	req := Request{Token: id(), ReportID: in.ReportID, Disclosure: s.cfg.Disclosure, DisclosureVersion: s.cfg.DisclosureVersion, Wording: s.cfg.SMSWording, Marketing: in.Marketing, Created: time.Now().UTC(), Expires: time.Now().Add(30 * time.Minute), State: "unconsumed"}
+	name := strings.TrimSpace(in.Name)
+	if utf8.RuneCountInString(name) > 80 || strings.ContainsAny(name, "{}") || tokenPattern.MatchString(name) || strings.IndexFunc(name, unicode.IsControl) >= 0 {
+		http.Error(w, "Use a name of up to 80 characters, or leave it blank.", 400)
+		return
+	}
+	wording := s.cfg.SMSWording
+	if name == "" {
+		wording = strings.ReplaceAll(wording, " My name is {name}.", "")
+	}
+	wording = strings.NewReplacer("{domain}", snapshot.Report.Domain, "{name}", name).Replace(wording)
+	req := Request{Token: id(), ReportID: in.ReportID, Disclosure: s.cfg.Disclosure, DisclosureVersion: s.cfg.DisclosureVersion, Wording: wording, Marketing: in.Marketing, Created: time.Now().UTC(), Expires: time.Now().Add(30 * time.Minute), State: "unconsumed"}
 	if s.db.Update(r.Context(), "request_"+req.Token, func(raw json.RawMessage) (any, error) {
 		if len(raw) > 0 {
 			return nil, errConflict
@@ -237,7 +254,7 @@ func (s *Server) sendPending(ctx context.Context, req Request) {
 	}
 	sendCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
-	sid, state, _ := s.sender.Send(sendCtx, req.Sender, "Your is-optimized.com report: "+s.cfg.PublicURL+"/reports/"+req.ReportID+"/pdf", s.cfg.PublicURL+"/webhooks/twilio/status?request="+req.Token)
+	sid, state, _ := s.sender.Send(sendCtx, req.Sender, "Sire Run, Inc.: Here’s your free website audit report: "+s.cfg.PublicURL+"/reports/"+req.ReportID+"/pdf. Reply STOP to opt out.", s.cfg.PublicURL+"/webhooks/twilio/status?request="+req.Token)
 	s.setDelivery((&http.Request{Method: "POST"}).WithContext(ctx), req.Token, state, sid)
 }
 

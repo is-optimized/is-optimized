@@ -4,7 +4,7 @@ This is source preparation, not a deployed service. Review the current RFC and e
 
 ## Runtime qualification
 
-Pin Go, OPS, and Nanos using `infra/nanos/versions.json`. OPS and Nanos are not installed/qualified by this repository. Build the Linux ELF with CGO disabled, generate the nonsecret OPS configuration using `scripts/nanos-config.py`, and qualify the pinned OPS local image workflow against its documentation. Package a raw disk archive accepted by GCP and supply its local path as the Pulumi `imageArchive` input. Do not upload/create cloud images through OPS commands; Pulumi owns the bucket object, image, instance template, and instance group.
+Pin Go, OPS, and Nanos using `infra/nanos/versions.json`. OPS and Nanos are not installed/qualified by this repository. Build the Linux ELF with CGO disabled, generate the nonsecret OPS configuration using `scripts/nanos-config.py --mode local|gcp --ca-dir <public-CA-only-directory> --image <absolute-task-image-path>`, and qualify the pinned OPS local image workflow against its documentation. Package a raw disk archive accepted by GCP and supply its local path as the Pulumi `imageArchive` input. Do not upload/create cloud images through OPS commands; Pulumi owns the bucket object, image, instance template, and instance group.
 
 The current packaging configuration deliberately disables SMS. Secure runtime secret retrieval, workload identity, CA roots, clock behavior, Firestore/GCS connectivity and PDF font rendering must be demonstrated inside Nanos before enabling production. Never bake `TWILIO_AUTH_TOKEN` or a service-account private key into an image. Runtime environment injection is acceptable for local testing only; qualify the implemented ADC-authenticated Secret Manager retrieval path for the production image. Set TWILIO_AUTH_TOKEN_SECRET to a numeric resource version and grant the runtime identity access only to that secret.
 
@@ -35,3 +35,7 @@ GCS has a proposed30-day artifact lifecycle. Public reads enforce report expiry.
 Monitor queue saturation, failed/unknown scans, expired leases, rendering failures, pending/sending/unknown delivery age, suppression errors, HTTP5xx, and resource pressure. `/healthz` is process liveness only; separately probe durable storage/readiness from the deployment qualification procedure. Logs must never contain raw phone numbers, provider tokens, full SMS bodies, or full target HTML.
 
 Record separate measurements for kernel boot, application readiness, GCP provisioning, p50/p95 scans, PDF rendering, memory, binary/image size, and costs. No timing claim is established by source preparation.
+
+## Current deployment handoff
+
+See [deployment candidate and cost handoff](deployment-candidate.md) for the current authentication, budget, capacity, packaging, and resource-identity blockers. No infrastructure preview or runtime qualification has occurred.

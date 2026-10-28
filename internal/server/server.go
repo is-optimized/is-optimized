@@ -76,12 +76,19 @@ func New(db store.Store, scan Scanner, sender messaging.Sender, cfg Config) (*Se
 	if e != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
 		return nil, errors.New("PUBLIC_URL must be an origin")
 	}
-	if cfg.SMS && (u.Scheme != "https" || cfg.TwilioAccount == "" || cfg.TwilioToken == "" || cfg.TwilioFrom == "" || cfg.Disclosure == "" || cfg.DisclosureVersion == "" || !strings.Contains(cfg.SMSWording, "{token}") || sender == nil) {
-		return nil, errors.New("SMS needs HTTPS, provider configuration, versioned disclosure, wording containing {token}, and sender")
+	if cfg.SMSWording == "" {
+		cfg.SMSWording = ApprovedRequestWording
+	}
+	if !strings.Contains(cfg.SMSWording, "{token}") {
+		cfg.SMSWording += "\nReport code: {token}"
+	}
+	if cfg.SMS && (u.Scheme != "https" || cfg.TwilioAccount == "" || cfg.TwilioToken == "" || cfg.TwilioFrom == "" || cfg.Disclosure == "" || cfg.DisclosureVersion == "" || sender == nil) {
+		return nil, errors.New("SMS needs HTTPS, provider configuration, versioned disclosure, and sender")
 	}
 	s := &Server{db: db, scan: scan, sender: sender, cfg: cfg, mux: http.NewServeMux(), slots: make(chan struct{}, 4), rates: map[string][]time.Time{}}
 	s.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
 	s.mux.HandleFunc("GET /{$}", s.home)
+	s.mux.HandleFunc("GET /assets/{name}", render.Asset)
 	s.mux.HandleFunc("POST /api/v1/scans", s.createScan)
 	s.mux.HandleFunc("GET /api/v1/scans/{id}", s.scanStatus)
 	s.mux.HandleFunc("POST /api/v1/report-requests", s.requestReport)

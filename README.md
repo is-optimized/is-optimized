@@ -24,7 +24,7 @@ When execution capacity is admitted, run `go test -race ./...`, `go vet ./...`, 
 | `TWILIO_AUTH_TOKEN_SECRET` | Pinned Secret Manager version resource; production token retrieved through ADC |
 | `CONFIG_FROM_METADATA` | Set true in Nanos image to load Pulumi-managed nonsecret instance configuration |
 | `CONSENT_DISCLOSURE`, `CONSENT_VERSION` | Owner-supplied wording and immutable version identifier |
-| `SMS_REQUEST_WORDING` | Owner-supplied pre-filled message containing `{token}` |
+| `SMS_REQUEST_WORDING` | Optional approved request template; `{domain}` and `{name}` substituted, correlation token appended internally |
 
 Twilio inbound URL: `/webhooks/twilio/inbound`; status callback URLs are generated per request. Signatures are checked against `PUBLIC_URL` plus the exact request URI. Configure provider opt-out support. A report request and optional marketing choice are separate data. This service sends report links only; it does not authorize or perform marketing campaigns or calls.
 
@@ -33,3 +33,7 @@ Twilio inbound URL: `/webhooks/twilio/inbound`; status callback URLs are generat
 Read [operations](docs/operations.md), [RFC](docs/rfc/001-mvp.md), and [delivery evidence](docs/devlog.md). Infrastructure is defined in `infra/Pulumi.yaml`; it has not been previewed or applied. Never use OPS cloud create commands to bypass the IaC boundary. A Linux binary or synthetic Twilio test is not Nanos/GCP/provider qualification.
 
 The hosted `is-agentic` scanner source was unavailable. This implementation uses an independent documented methodology, not a source port or demonstrated scoring parity.
+
+## Brand and current acceptance
+
+The embedded editorial UI and report share [brand guidance](docs/brand.md). Current design/deployment work is recorded in [verification](docs/verification.md) and the [costed deployment handoff](docs/deployment-candidate.md). SMS remains disabled pending its separate approval and qualification.

@@ -7,7 +7,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"sort"
@@ -28,10 +27,14 @@ func (f *fakeScanner) Scan(context.Context, string) (reportmodel.Report, error) 
 	return reportmodel.Report{Domain: "example.com", StartedAt: time.Now(), CompletedAt: time.Now(), MethodologyVersion: scanner.MethodologyVersion, Pages: []reportmodel.Page{{URL: "https://example.com", StatusCode: 200}}, Pillars: []reportmodel.Pillar{{ID: "seo", Name: "SEO", Score: &n, Coverage: 1}}, Findings: []reportmodel.Finding{{ID: "title", Pillar: "seo", Title: "Title", Status: "fail", Evidence: "<script>alert(1)</script>", Remediation: "Add a descriptive title"}}}, nil
 }
 
-type fakeSender struct{ calls int }
+type fakeSender struct {
+	calls int
+	body  string
+}
 
-func (f *fakeSender) Send(context.Context, string, string, string) (string, string, error) {
+func (f *fakeSender) Send(_ context.Context, _ string, body string, _ string) (string, string, error) {
 	f.calls++
+	f.body = body
 	return "SMreply", "accepted", nil
 }
 func setup(t *testing.T) (*Server, *fakeScanner, *fakeSender) {
@@ -238,5 +241,79 @@ func TestTerminalHistoryDoesNotBlockAdmission(t *testing.T) {
 	w := perform(s, "POST", "/api/v1/scans", `{"domain":"new.example.com"}`)
 	if w.Code != 202 {
 		t.Fatal(w.Code, w.Body.String())
+	}
+}
+
+func TestApprovedSMSHandoff(t *testing.T) {
+	s, _, sender := setup(t)
+	s.cfg.SMSWording = ApprovedRequestWording + "\nReport code: {token}"
+	key := completed(t, s)
+	for _, name := range []string{"", "David"} {
+		payload, _ := json.Marshal(map[string]any{"report_id": key, "name": name, "marketing": false})
+		w := perform(s, "POST", "/api/v1/report-requests", string(payload))
+		if w.Code != 201 {
+			t.Fatal(w.Code, w.Body.String())
+		}
+		var handoff map[string]string
+		if err := json.Unmarshal(w.Body.Bytes(), &handoff); err != nil {
+			t.Fatal(err)
+		}
+		expected := "Hi, please send me the free website audit report for example.com."
+		if name != "" {
+			expected += " My name is David."
+		}
+		token := tokenPattern.FindString(handoff["body"])
+		if token == "" || handoff["body"] != expected+"\nReport code: "+token {
+			t.Fatal("unexpected request wording", handoff["body"])
+		}
+		parsed, err := url.Parse(handoff["sms_url"])
+		if err != nil || parsed.Query().Get("body") != handoff["body"] {
+			t.Fatal("SMS URL does not preserve wording")
+		}
+		var req Request
+		if err = s.db.Get(context.Background(), "request_"+token, &req); err != nil || req.Marketing || req.State != "unconsumed" {
+			t.Fatal("composer opening recorded delivery/consent", err, req.State)
+		}
+		before := sender.calls
+		form := url.Values{"AccountSid": {"ACtest"}, "From": {"+15555550123"}, "To": {s.cfg.TwilioFrom}, "MessageSid": {"SMapproved" + name}, "Body": {handoff["body"]}}
+		if w = signed(s, "/webhooks/twilio/inbound", form); w.Code != 200 {
+			t.Fatal(w.Code)
+		}
+		s.dispatchMessages(context.Background())
+		expectedReply := "Sire Run, Inc.: Here’s your free website audit report: https://audit.example/reports/" + key + "/pdf. Reply STOP to opt out."
+		if sender.calls != before+1 || sender.body != expectedReply {
+			t.Fatal("reply mismatch", sender.calls, sender.body)
+		}
+	}
+}
+
+func TestSMSNameAndDisabledBoundary(t *testing.T) {
+	s, _, _ := setup(t)
+	key := completed(t, s)
+	for _, name := range []string{"{token}", "Alice\nSTOP", strings.Repeat("a", 81), strings.Repeat("a", 36)} {
+		data, _ := json.Marshal(map[string]any{"report_id": key, "name": name})
+		if w := perform(s, "POST", "/api/v1/report-requests", string(data)); w.Code != 400 {
+			t.Fatal("unsafe name accepted", w.Code)
+		}
+	}
+	s.cfg.SMS = false
+	if w := perform(s, "POST", "/api/v1/report-requests", `{"report_id":"`+key+`"}`); w.Code != 503 {
+		t.Fatal(w.Code)
+	}
+	w := perform(s, "GET", "/", "")
+	if w.Code != 200 || strings.Contains(w.Body.String(), `id="consent"`) || !strings.Contains(w.Body.String(), `aria-describedby="sms-note"`) {
+		t.Fatal("disabled SMS view", w.Code)
+	}
+	if w = perform(s, "GET", "/reports/"+key, ""); w.Code != 200 {
+		t.Fatal("SMS disabled blocked report")
+	}
+	for _, asset := range []string{"mark.svg", "wordmark.svg"} {
+		w = perform(s, "GET", "/assets/"+asset, "")
+		if w.Code != 200 || w.Header().Get("Content-Type") != "image/svg+xml" {
+			t.Fatal("missing embedded brand asset")
+		}
+	}
+	if w = perform(s, "GET", "/assets/nope.svg", ""); w.Code != 404 {
+		t.Fatal("asset route exposed unknown content")
 	}
 }
