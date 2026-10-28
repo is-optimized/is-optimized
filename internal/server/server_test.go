@@ -362,3 +362,39 @@ func TestSMSHexadecimalDomainCorrelation(t *testing.T) {
 		t.Fatal("correlation was consumed twice")
 	}
 }
+
+func TestSMSIntendedNumberBinding(t *testing.T) {
+	s, _, sender := setup(t)
+	key := completed(t, s)
+	bad := perform(s, "POST", "/api/v1/report-requests", `{"report_id":"`+key+`","phone":"not-a-phone"}`)
+	if bad.Code != 400 {
+		t.Fatal(bad.Code)
+	}
+	good := perform(s, "POST", "/api/v1/report-requests", `{"report_id":"`+key+`","phone":"+15555550123"}`)
+	if good.Code != 201 {
+		t.Fatal(good.Code, good.Body.String())
+	}
+	var handoff map[string]string
+	if err := json.Unmarshal(good.Body.Bytes(), &handoff); err != nil {
+		t.Fatal(err)
+	}
+	token := tokenPattern.FindString(handoff["body"])
+	form := url.Values{"AccountSid": {"ACtest"}, "From": {"+15555550999"}, "To": {s.cfg.TwilioFrom}, "MessageSid": {"SMwrong"}, "Body": {handoff["body"]}}
+	signed(s, "/webhooks/twilio/inbound", form)
+	var req Request
+	if err := s.db.Get(context.Background(), "request_"+token, &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.State != "unconsumed" || sender.calls != 0 {
+		t.Fatal("wrong sender consumed request")
+	}
+	form.Set("From", "+15555550123")
+	form.Set("MessageSid", "SMright")
+	signed(s, "/webhooks/twilio/inbound", form)
+	if err := s.db.Get(context.Background(), "request_"+token, &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.State != "pending" || req.Sender != "+15555550123" {
+		t.Fatal(req.State)
+	}
+}
