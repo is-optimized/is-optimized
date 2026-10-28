@@ -425,11 +425,7 @@ func (s *Server) publish(ctx context.Context, j Job, snap Snapshot) {
 	}); e != nil {
 		return
 	}
-	// The public directory is a best-effort projection, never a scan gate.
-	if e := s.indexPublicReport(ctx, snap); e != nil {
-		slog.Warn("public report directory update unavailable")
-	}
-	s.db.Update(ctx, "queue", func(raw json.RawMessage) (any, error) {
+	if e := s.db.Update(ctx, "queue", func(raw json.RawMessage) (any, error) {
 		var q Queue
 		if e := json.Unmarshal(raw, &q); e != nil {
 			return nil, e
@@ -442,7 +438,16 @@ func (s *Server) publish(ctx context.Context, j Job, snap Snapshot) {
 		cur.Updated = time.Now().UTC()
 		q.Jobs[j.ID] = cur
 		return q, nil
-	})
+	}); e != nil {
+		return
+	}
+	// Authoritative completion is already durable. A directory outage must
+	// neither hold active admission nor monopolize the recovery scheduler.
+	directoryCtx, cancel := context.WithTimeout(ctx, directoryWriteTimeout)
+	defer cancel()
+	if e := s.indexPublicReport(directoryCtx, snap); e != nil {
+		slog.Warn("public report directory update unavailable")
+	}
 }
 func (s *Server) load(w http.ResponseWriter, r *http.Request, key string) (Snapshot, bool) {
 	var snap Snapshot

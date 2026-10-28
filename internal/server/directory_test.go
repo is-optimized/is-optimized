@@ -15,9 +15,12 @@ import (
 
 type directoryStore struct {
 	store.Store
-	reads              []string
-	failDirectoryRead  bool
-	failDirectoryWrite bool
+	reads                    []string
+	failDirectoryRead        bool
+	failDirectoryWrite       bool
+	stallDirectoryWrite      bool
+	terminalBeforeProjection bool
+	shortProjectionDeadline  bool
 }
 
 func (d *directoryStore) Get(ctx context.Context, key string, out any) error {
@@ -31,6 +34,25 @@ func (d *directoryStore) List(context.Context, string) ([]json.RawMessage, error
 	return nil, errors.New("unbounded history listing is forbidden")
 }
 func (d *directoryStore) Update(ctx context.Context, key string, f func(json.RawMessage) (any, error)) error {
+	if key == directoryKey && d.stallDirectoryWrite {
+		var queue Queue
+		if err := d.Store.Get(ctx, "queue", &queue); err != nil {
+			return err
+		}
+		d.terminalBeforeProjection = len(queue.Jobs) > 0
+		for _, job := range queue.Jobs {
+			if job.State != "completed" {
+				d.terminalBeforeProjection = false
+			}
+		}
+		deadline, ok := ctx.Deadline()
+		d.shortProjectionDeadline = ok && time.Until(deadline) <= directoryWriteTimeout
+		if !d.shortProjectionDeadline {
+			return errors.New("projection lacks a short deadline")
+		}
+		<-ctx.Done()
+		return ctx.Err()
+	}
 	if key == directoryKey && d.failDirectoryWrite {
 		return errors.New("fixture unavailable")
 	}
@@ -174,5 +196,36 @@ func TestDirectoryFailureDoesNotBlockReportPublication(t *testing.T) {
 		if w := perform(s, "GET", path, ""); w.Code != 200 {
 			t.Fatal("directory failure hid report", path, w.Code)
 		}
+	}
+}
+
+func TestStalledDirectoryRunsAfterTerminalPublication(t *testing.T) {
+	s, scan, _ := setup(t)
+	stalled := &directoryStore{Store: s.db, stallDirectoryWrite: true}
+	s.db = stalled
+	key := completed(t, s)
+	if !stalled.terminalBeforeProjection || !stalled.shortProjectionDeadline {
+		t.Fatal("optional projection preceded completion or lacked its deadline")
+	}
+	var queue Queue
+	if err := s.db.Get(context.Background(), "queue", &queue); err != nil {
+		t.Fatal(err)
+	}
+	if queue.Jobs[key].State != "completed" || scan.calls != 1 {
+		t.Fatal("stalled directory blocked authoritative completion")
+	}
+	if w := perform(s, "GET", "/example.com", ""); w.Code != 200 {
+		t.Fatal("report unavailable during directory outage")
+	}
+	// Recovery uses the same short bound even with a long-lived parent context.
+	job := queue.Jobs[key]
+	job.State = "publishing"
+	queue.Jobs[key] = job
+	s.db.Update(context.Background(), "queue", func(json.RawMessage) (any, error) { return queue, nil })
+	stalled.terminalBeforeProjection = false
+	stalled.shortProjectionDeadline = false
+	s.recoverPublishing(context.Background())
+	if !stalled.terminalBeforeProjection || !stalled.shortProjectionDeadline || scan.calls != 1 {
+		t.Fatal("recovery bypassed the projection bound or rescanned")
 	}
 }

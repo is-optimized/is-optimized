@@ -17,6 +17,7 @@ import (
 const directoryKey = "public_directory_v1"
 const directoryCapacity = 24
 const recentLimit = 6
+const directoryWriteTimeout = 500 * time.Millisecond
 
 var publicReportID = regexp.MustCompile(`^[a-f0-9]{36}$`)
 
@@ -42,7 +43,7 @@ func newerSite(a, b publicSite) bool {
 	return a.CompletedAt.After(b.CompletedAt)
 }
 
-// Called only after immutable report and latest-domain pointer publication.
+// Called only after immutable report, latest-domain pointer, and terminal queue publication.
 // Retry-safe: the existing publishing recovery path can repeat the same update.
 func (s *Server) indexPublicReport(ctx context.Context, snap Snapshot) error {
 	return s.db.Update(ctx, directoryKey, func(raw json.RawMessage) (any, error) {
