@@ -1,6 +1,6 @@
 # MVP methodology and provenance
 
-This document records the independently implemented MVP check registry. It does not claim parity with the hosted Is Agentic service. The source of executable behavior is `internal/scanner/checks.go`; every score identifies methodology `2026-10-v1` and selection policy `home-links-document-order-v1`.
+This document records the independently implemented MVP check registry. It does not claim parity with the hosted Is Agentic service. The source of executable behavior is `internal/scanner/checks.go`; every score identifies methodology `2026-10-v2` and selection policy `home-links-document-order-v1`.
 
 ## Reference provenance
 
@@ -25,8 +25,8 @@ Each check runs against every selected content page. The pillar score aggregates
 | --- | ---: | --- | --- |
 | `seo.access` | 3 | Foundational. Pass for usable HTTP 200 HTML; otherwise unknown. | Establishes whether the sample can be assessed. |
 | `seo.index` | 2 | Pass without observed noindex; partial when present. | A noindex directive can be intentional; recommendation asks the owner to review intent. |
-| `seo.title` | 2 | Pass when title text exists; fail otherwise. | Descriptive title presence is observable; quality and cross-site uniqueness are not inferred. |
-| `seo.description` | 1 | Pass when meta description exists; fail otherwise. | Description presence does not guarantee a displayed search snippet. |
+| `seo.title` | 2 | Fail when absent; partial when reused on distinct observed sample URLs; pass otherwise. | Descriptive title presence is observable; quality and cross-site uniqueness are not inferred. |
+| `seo.description` | 1 | Fail when absent; partial when reused on distinct observed sample URLs; pass otherwise. | Description presence does not guarantee a displayed search snippet. |
 | `seo.canonical` | 1 | Pass for one valid absolute public HTTP(S) canonical; partial otherwise. | Does not assert that the declared canonical is the correct business choice or fetch its target. |
 | `seo.images` | 1 | Not applicable without images; pass when every image has alt; partial otherwise. | Empty alt may be correct for decorative images. Semantic accuracy is not verified. |
 | `geo.access` | 3 | Foundational. Pass for usable HTTP 200 HTML; otherwise unknown. | Establishes observable public content only. |
@@ -55,3 +55,15 @@ The transport resolves all destination addresses, rejects non-public/mixed publi
 ## Verification
 
 `GOMAXPROCS=2 go test -p 1 ./internal/scanner` passes with synthetic transports and no real target scans. Tests cover depth/concurrency, robots before redirected content, unavailable policies, wildcard precedence, address rejection, domain normalization, response limits, request/discovery budgets, URL length, applicability, and score withholding. Integration, Nanos runtime qualification, and production load measurements are separate delivery evidence.
+
+## v2 sampled SEO additions
+
+The v2 registry adds `seo.headings` (weight 1) and `seo.viewport` (weight 1). Heading checks fail when no nonempty H1 exists, are partial for an empty H1 alongside a nonempty one or an upward heading-level skip, and pass otherwise. Multiple meaningful H1s are reported as a count without an automatic penalty. Viewport passes for an observed `width=device-width` declaration and is partial otherwise; this does not test rendered mobile usability. Unobserved pages remain unknown.
+
+Existing title and description checks become partial for equal complete values after case and whitespace normalization across distinct observed final URLs. Redirect aliases count once. This uses the existing metadata weights rather than adding duplicate penalties. Missing values still fail. A single observed page cannot establish full-site uniqueness.
+
+Canonical checks recognize tokenized rel values, flag absent, multiple or malformed absolute HTTP(S) references, and explain a different canonical destination without penalizing it solely for differing from the fetched URL. Targets are not fetched and intentional consolidation is not treated as a defect. HTTP Link-header canonicals are not evaluated.
+
+Zero-weight findings expose sampled-page outcomes, initial-HTML word counts, and HSTS header presence. Requested and final URLs distinguish completed redirects. Unknown fetch outcomes remain distinct from observed HTTP statuses. Word counts exclude head/script/style text but do not establish visible word counts or content quality. HSTS presence is a security observation, not validated transport-policy configuration or an SEO score input. No new requests, crawl depth, or performance measurements are introduced. HTML and PDF show these findings from the same saved evidence.
+
+New fixture tests are written in `observations_test.go`. Execution remains pending because the shared Mac build admission was refused for memory pressure; the older verification statement above describes the pre-v2 scanner only.

@@ -19,7 +19,7 @@ import (
 	"github.com/is-optimized/is-optimized/internal/reportmodel"
 )
 
-const MethodologyVersion = "2026-10-v1"
+const MethodologyVersion = "2026-10-v2"
 const maxBody = 2 << 20
 
 type Scanner struct {
@@ -219,6 +219,7 @@ func (s *Scanner) Scan(ctx context.Context, domain string) (reportmodel.Report, 
 		report.Pages = append(report.Pages, p.page)
 		report.Findings = append(report.Findings, evaluate(p)...)
 	}
+	report.Findings = markDuplicates(report.Findings, pages)
 	report.Pillars = score(report.Findings)
 	report.CompletedAt = time.Now().UTC()
 	return report, nil
