@@ -84,47 +84,18 @@ func Prompt(r reportmodel.Report) string {
 	return b.String()
 }
 
-type checkGroup struct {
-	Name     string
-	Findings []reportmodel.Finding
-}
-
-func reportSections(r reportmodel.Report) ([]reportmodel.Finding, []checkGroup) {
-	var fixes []reportmodel.Finding
-	groups := make([]checkGroup, 0, len(r.Pillars)+1)
-	known := map[string]int{}
-	for _, pillar := range r.Pillars {
-		known[pillar.ID] = len(groups)
-		groups = append(groups, checkGroup{Name: pillarLabel(pillar.ID)})
-	}
-	for _, f := range r.Findings {
-		if f.Status == "fail" || f.Status == "partial" {
-			fixes = append(fixes, f)
-		}
-		i, ok := known[f.Pillar]
-		if !ok {
-			i = len(groups)
-			known[f.Pillar] = i
-			groups = append(groups, checkGroup{Name: f.Pillar})
-		}
-		groups[i].Findings = append(groups[i].Findings, f)
-	}
-	return fixes, groups
-}
-
 func HTML(w io.Writer, r reportmodel.Report) error {
 	r = ordered(r)
-	fixes, checks := reportSections(r)
 	return reportTemplate.Execute(w, struct {
-		Report reportmodel.Report
-		CSS    template.CSS
-		Prompt string
-		Fixes  []reportmodel.Finding
-		Checks []checkGroup
-	}{r, template.CSS(Style), Prompt(r), fixes, checks})
+		Report  reportmodel.Report
+		CSS     template.CSS
+		Prompt  string
+		Summary reportSummary
+	}{r, template.CSS(Style), Prompt(r), summarize(r)})
 }
 func PDF(r reportmodel.Report) ([]byte, error) {
 	r = ordered(r)
+	view := summarize(r)
 	p := fpdf.New("P", "mm", "A4", "")
 	p.SetMargins(18, 25, 18)
 	p.SetAutoPageBreak(true, 22)
@@ -192,15 +163,16 @@ func PDF(r reportmodel.Report) ([]byte, error) {
 	p.SetFont("Go", "", 9)
 	p.SetTextColor(80, 89, 81)
 	line("Observed " + r.CompletedAt.UTC().Format("02 Jan 2006 · 15:04 UTC"))
-	line(fmt.Sprintf("%d selected pages · Methodology %s", len(r.Pages), r.MethodologyVersion))
+	line(fmt.Sprintf("%d selected pages · %d successful HTTP responses · Methodology %s", view.Selected, view.Responded, r.MethodologyVersion))
+	line(view.Narrative)
 	p.Ln(5)
 	// Three compact columns, with a white print canvas and thin rules.
 	scoreTop := p.GetY()
-	for i, v := range r.Pillars {
+	for i, v := range view.Pillars {
 		if i > 0 && i%3 == 0 {
-			scoreTop += 48
+			scoreTop += 66
 		}
-		if scoreTop > 220 {
+		if scoreTop > 200 {
 			p.AddPage()
 			scoreTop = p.GetY()
 		}
@@ -210,7 +182,7 @@ func PDF(r reportmodel.Report) ([]byte, error) {
 		p.SetXY(x, scoreTop+4)
 		p.SetTextColor(80, 89, 81)
 		p.SetFont("Go", "", 8)
-		p.MultiCell(54, 4, pillarLabel(v.ID), "", "L", false)
+		p.MultiCell(54, 4, v.Short+" · "+v.Name, "", "L", false)
 		p.SetXY(x, scoreTop+16)
 		p.SetTextColor(22, 26, 23)
 		if v.Score == nil {
@@ -226,16 +198,48 @@ func PDF(r reportmodel.Report) ([]byte, error) {
 		p.SetXY(x, scoreTop+36)
 		p.SetFont("Go", "", 8)
 		p.SetTextColor(80, 89, 81)
-		p.Cell(54, 5, fmt.Sprintf("Evidence coverage: %.0f%%", 100*v.Coverage))
+		if v.Missing {
+			p.Cell(54, 5, "Pillar result not recorded")
+		} else {
+			p.Cell(54, 5, fmt.Sprintf("Evidence coverage: %.0f%%", 100*v.Coverage))
+		}
+		barX := x
+		for _, segment := range v.Segments {
+			width := 54 * float64(segment.Count) / float64(v.Counts.Total)
+			switch segment.Status {
+			case "pass":
+				p.SetFillColor(74, 110, 57)
+			case "partial":
+				p.SetFillColor(163, 143, 80)
+			case "fail":
+				p.SetFillColor(168, 94, 76)
+			case "unknown":
+				p.SetFillColor(150, 155, 148)
+			case "not_applicable":
+				p.SetFillColor(95, 103, 93)
+			case "information":
+				p.SetFillColor(189, 195, 185)
+			default:
+				p.SetFillColor(150, 140, 155)
+			}
+			p.Rect(barX, scoreTop+43, width, 2, "F")
+			barX += width
+		}
+		if v.Counts.Total == 0 {
+			p.SetDrawColor(160, 168, 158)
+			p.Rect(x, scoreTop+43, 54, 2, "D")
+		}
+		p.SetXY(x, scoreTop+48)
+		p.SetFont("Go", "", 7)
+		p.MultiCell(54, 3.8, fmt.Sprintf("%d passed · %d partial · %d failed · %d unknown\n%d not applicable · %d informational · %d unclassified", v.Counts.Pass, v.Counts.Partial, v.Counts.Fail, v.Counts.Unknown, v.Counts.NotApplicable, v.Counts.Information, v.Counts.Other), "", "L", false)
 	}
-	p.SetXY(18, scoreTop+48)
+	p.SetXY(18, scoreTop+64)
 	p.SetTextColor(22, 26, 23)
 	p.SetFont("Go", "", 10)
+	line("Bars show unweighted check counts, not score contributions. No composite score or external ranking is calculated.")
 	line("Scores describe observed technical signals, not rankings, AI citations, revenue, or successful AI tasks. Coverage is the share of applicable evidence we could check. Insufficient evidence is not a zero.")
 	line("A focused snapshot: homepage plus up to four direct links, without deeper crawling or JavaScript execution. HTML and PDF use the same saved evidence.")
-	heading("01 / FINDINGS & FIXES", "Findings and suggested fixes")
-	line("Fixes first, then evidence gaps, passing checks, and context. Confirm each finding in your site's source before making changes.")
-	for _, f := range r.Findings {
+	drawFinding := func(f reportmodel.Finding) {
 		if p.GetY() > 231 {
 			p.AddPage()
 		}
@@ -245,7 +249,11 @@ func PDF(r reportmodel.Report) ([]byte, error) {
 		p.Ln(4)
 		p.SetTextColor(45, 65, 42)
 		p.SetFont("Go", "B", 8)
-		line(strings.ToUpper(statusLabel(f.Status)) + " · " + f.Pillar)
+		label := strings.ToUpper(statusLabel(f.Status)) + " · " + f.Pillar
+		if f.Foundational {
+			label += " · Foundational check"
+		}
+		line(label)
 		p.SetTextColor(22, 26, 23)
 		p.SetFont("Go", "B", 13)
 		line(f.Title)
@@ -262,11 +270,35 @@ func PDF(r reportmodel.Report) ([]byte, error) {
 		line("What we observed: " + f.Evidence)
 		line("Next step: " + f.Remediation)
 	}
+	heading("01 / ACTION LIST", "Fix these first")
+	line("Failed checks before partial checks; foundational checks first within each status. This is a technical order, not a business-impact claim.")
+	if len(view.Fixes) == 0 {
+		line("No failed or partial checks were recorded. Inspect unknown checks and coverage before drawing conclusions.")
+	}
+	for _, f := range view.Fixes {
+		drawFinding(f)
+	}
+	heading("02 / EVIDENCE", "Look behind each score")
+	for _, pillar := range view.Pillars {
+		heading(pillar.Short, pillar.Name)
+		if pillar.Missing {
+			line("Pillar result not recorded.")
+		} else {
+			line(fmt.Sprintf("Evidence coverage: %.0f%%", pillar.Coverage*100))
+		}
+		line(fmt.Sprintf("%d recorded checks: %d passed, %d partial, %d failed, %d unknown, %d not applicable, %d informational, %d unclassified.", pillar.Counts.Total, pillar.Counts.Pass, pillar.Counts.Partial, pillar.Counts.Fail, pillar.Counts.Unknown, pillar.Counts.NotApplicable, pillar.Counts.Information, pillar.Counts.Other))
+		if len(pillar.Findings) == 0 {
+			line("No checks recorded for this pillar. This is not evidence of a pass.")
+		}
+		for _, f := range pillar.Findings {
+			drawFinding(f)
+		}
+	}
 	p.AddPage()
-	heading("02 / PUT IT TO WORK", "Developer brief")
+	heading("03 / TAKE ACTION", "Developer brief")
 	p.SetFont("Go", "", 9)
 	line(Prompt(r))
-	heading("03 / SCOPE & PROVENANCE", "Scope of this report")
+	heading("04 / SCOPE & PROVENANCE", "Scope of this report")
 	for _, pg := range r.Pages {
 		response := fmt.Sprintf("HTTP %d", pg.StatusCode)
 		if pg.StatusCode == 0 {
