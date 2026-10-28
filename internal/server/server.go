@@ -56,6 +56,7 @@ type Snapshot struct {
 }
 type Request struct {
 	Token, ReportID, Disclosure, DisclosureVersion, Wording string
+	IntendedPhone                                           string
 	Marketing                                               bool
 	Created, Expires                                        time.Time
 	Sender, InboundID, ProviderID, State                    string

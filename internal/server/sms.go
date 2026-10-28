@@ -31,6 +31,7 @@ func (s *Server) requestReport(w http.ResponseWriter, r *http.Request) {
 		ReportID  string `json:"report_id"`
 		Marketing bool   `json:"marketing"`
 		Name      string `json:"name"`
+		Phone     string `json:"phone"`
 	}
 	if decode(r, &in) != nil {
 		http.Error(w, "invalid request", 400)
@@ -44,6 +45,11 @@ func (s *Server) requestReport(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "request limit reached", 429)
 		return
 	}
+	in.Phone = strings.TrimSpace(in.Phone)
+	if in.Phone != "" && !phonePattern.MatchString(in.Phone) {
+		http.Error(w, "invalid mobile phone number", 400)
+		return
+	}
 	name := strings.TrimSpace(in.Name)
 	if utf8.RuneCountInString(name) > 80 || strings.ContainsAny(name, "{}") || tokenPattern.MatchString(name) || strings.IndexFunc(name, unicode.IsControl) >= 0 {
 		http.Error(w, "Use a name of up to 80 characters, or leave it blank.", 400)
@@ -54,7 +60,7 @@ func (s *Server) requestReport(w http.ResponseWriter, r *http.Request) {
 		wording = strings.ReplaceAll(wording, " My name is {name}.", "")
 	}
 	wording = strings.NewReplacer("{domain}", snapshot.Report.Domain, "{name}", name).Replace(wording)
-	req := Request{Token: id(), ReportID: in.ReportID, Disclosure: s.cfg.Disclosure, DisclosureVersion: s.cfg.DisclosureVersion, Wording: wording, Marketing: in.Marketing, Created: time.Now().UTC(), Expires: time.Now().Add(30 * time.Minute), State: "unconsumed"}
+	req := Request{IntendedPhone: in.Phone, Token: id(), ReportID: in.ReportID, Disclosure: s.cfg.Disclosure, DisclosureVersion: s.cfg.DisclosureVersion, Wording: wording, Marketing: in.Marketing, Created: time.Now().UTC(), Expires: time.Now().Add(30 * time.Minute), State: "unconsumed"}
 	if s.db.Update(r.Context(), "request_"+req.Token, func(raw json.RawMessage) (any, error) {
 		if len(raw) > 0 {
 			return nil, errConflict
@@ -138,7 +144,7 @@ func (s *Server) inbound(w http.ResponseWriter, r *http.Request) {
 		if req.State != "unconsumed" {
 			return req, nil
 		}
-		if time.Now().After(req.Expires) || body != strings.ReplaceAll(req.Wording, "{token}", token) {
+		if (req.IntendedPhone != "" && req.IntendedPhone != from) || time.Now().After(req.Expires) || body != strings.ReplaceAll(req.Wording, "{token}", token) {
 			return nil, errConflict
 		}
 		req.Sender = from
