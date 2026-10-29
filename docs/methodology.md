@@ -1,6 +1,6 @@
 # MVP methodology and provenance
 
-This document records the independently implemented MVP check registry. It does not claim parity with the hosted Is Agentic service. The source of executable behavior is `internal/scanner/checks.go`; every score identifies methodology `2026-10-v2` and selection policy `home-links-document-order-v1`.
+This document records the independently implemented MVP check registry. It does not claim parity with the hosted Is Agentic service. The source of executable behavior is the registries and evaluation in `internal/scanner/checks.go` and `internal/scanner/readiness.go`; every score identifies methodology `2026-10-agentready-v1` and selection policy `home-links-document-order-v2`.
 
 ## Reference provenance
 
@@ -67,3 +67,19 @@ Canonical checks recognize tokenized rel values, flag absent, multiple or malfor
 Zero-weight findings expose sampled-page outcomes, initial-HTML word counts, and HSTS header presence. Requested and final URLs distinguish completed redirects. Unknown fetch outcomes remain distinct from observed HTTP statuses. Word counts exclude head/script/style text but do not establish visible word counts or content quality. HSTS presence is a security observation, not validated transport-policy configuration or an SEO score input. No new requests, crawl depth, or performance measurements are introduced. HTML and PDF show these findings from the same saved evidence.
 
 New fixture tests in `observations_test.go` passed on 2026-10-28 after an explicitly authorized retry passed shared-Mac admission. The complete `go test -race -p 1 ./...` suite and `go vet -p 1 ./...` also passed. These are synthetic/local execution results, not Nanos, provider, or production qualification.
+
+## AgentReady evidence and reference mapping
+
+The static audit describes **find**, **read**, and **act** stages alongside the existing SEO, GEO, and AI-agent pillars. Find concerns discovering useful first-party pages and resources. Read concerns information extractable from the initial response. Act concerns declared interfaces through which an agent might work. A discovered link is not proof that its destination is reachable or that an action can be completed.
+
+Findings now record their stage, an applicability reason, and an evidence level. `observed_html` describes an inspected initial-HTML signal; `discovered_interface` describes an advertised resource or interface without contract validation. `validated_contract` and `completed_task` are reserved for separately established evidence and are not produced by this scanner. Unknown findings do not establish an evidence level. Older reports without this metadata display **Not recorded**, preserving the limits of their original evidence.
+
+New reports record `behavioral_evaluation: not_run`. The static scanner does not log in, submit forms, call MCP tools, charge payments, or run a behavioral task. Reports distinguish task evaluation not run from older reports for which no task-evaluation state was recorded. There is no task-success score.
+
+Selected findings carry stable [AgentReady](https://www.agentready.org/) practice identifiers from the [pinned specification](https://github.com/agentready-org/standard/blob/273d2d7c991f30cd0785415023801b03766abc67/spec/spec.md). **Partial mapping** means the check observes part of the practice, such as initial-HTML text, rather than testing its complete requirement. **Reference only** identifies related guidance. Neither mapping is certification, validation of the whole standard, or a claim of score equivalence with Ora. The renderer links recognized identifiers to the fixed public guide; saved URLs are not accepted as trusted reference destinations.
+
+Additional discovery observations cover links to first-party docs and pricing, machine-readable indexes, and declared API, authentication, or agent-facing resources. They remain informational with zero score weight. The scanner reports what was linked without executing the advertised interface or inferring API/auth/payment requirements from the absence of a link. An informational applicability statement is context, not a business-purpose classifier or full-site inventory. Existing weighted checks remain independently chosen technical heuristics.
+
+These additions do not establish that JSON-LD-only facts are visible to a text-reading agent. Structured data, visible content, linked resources, validated interfaces, and completed tasks remain separate kinds of evidence. NANDA discovery or identity mechanisms may be useful when a product exposes agents; they are not universal website requirements and carry no generic-site absence penalty.
+
+The [Jev evaluation](https://ora.ai/blog/evaluating-jev) illustrates a separately controlled behavioral experiment. Its seeded task results do not calibrate these static weights. This change prepares clearer evidence provenance without adding an agent execution environment to the Go/Nanos service. Verification and deployment receipts must establish the exact released revision separately.
