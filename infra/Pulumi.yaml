@@ -256,6 +256,10 @@ resources:
       zone: ${zone}
       machineType: ${machineType}
       allowStoppingForUpdate: true
+      # Cold-start failures must remain observable through authenticated GCE
+      # screenshots even when the guest emits no serial output.
+      enableDisplay: true
+      desiredStatus: RUNNING
       bootDisk:
         autoDelete: true
         initializeParams:
