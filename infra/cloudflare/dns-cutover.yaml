@@ -1,0 +1,27 @@
+# Reviewed cutover intent, not an executable apply. Coordinator owns the explicitly
+# authorized Cloudflare MCP writes and must record actual IP/result/time below.
+zoneId: c110deebc79d486a28722cca21255430
+accountId: d06c5f91908c7955095c24cb8b42e32f
+zone: is-optimized.com
+sslMode: full
+records:
+  - id: 983f9bf73e6f24c3125423e1c2df6733
+    type: A
+    name: is-optimized.com
+    before: 192.64.119.176
+    desired: REPLACE_WITH_REVIEWED_GCP_ADDRESS_OUTPUT
+    proxied: true
+    ttl: 1
+  - id: 61ffe5ea74e051301b956ffdd1944f90
+    type: CNAME
+    name: www.is-optimized.com
+    before: parkingpage.namecheap.com
+    desired: is-optimized.com
+    proxied: true
+    ttl: 1
+preserve: All MX, TXT and other records; existing Full SSL mode
+receipt:
+  status: prepared-not-applied
+  actualOriginIPv4: null
+  appliedAt: null
+  verifiedAt: null
