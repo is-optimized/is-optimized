@@ -34,4 +34,8 @@ config = {'RunConfig': {'Memory': '1G', 'Ports': ['80', '443'] if args.mode == '
           'MapDirs': {str(ca_dir): '/etc/ssl/certs'}, 'Env': env}
 if args.mode == 'gcp':
     config['CloudConfig'] = {'ImageName': 'is-optimized'}
+    # GCE does not reliably expose this guest's console through the serial API.
+    # Capture bounded startup diagnostics using the documented Nanos driver.
+    config['Klibs'] = ['gcp', 'tls']
+    config['ManifestPassthrough'] = {'gcp': {'logging': {'log_id': 'is-optimized-startup'}}}
 print(json.dumps(config, indent=2))

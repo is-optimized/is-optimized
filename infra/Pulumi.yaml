@@ -85,6 +85,23 @@ resources:
       disableOnDestroy: false
     options:
       provider: ${provider}
+  loggingAPI:
+    type: gcp:projects:Service
+    properties:
+      project: ${project}
+      service: logging.googleapis.com
+      disableOnDestroy: false
+    options:
+      provider: ${provider}
+  startupLogging:
+    type: gcp:projects:IAMMember
+    properties:
+      project: ${project}
+      role: roles/logging.logWriter
+      member: serviceAccount:${serviceAccount.email}
+    options:
+      provider: ${provider}
+      dependsOn: ["${loggingAPI}"]
   iamAPI:
     type: gcp:projects:Service
     properties:
@@ -297,7 +314,7 @@ resources:
         provisioningModel: STANDARD
     options:
       provider: ${provider}
-      dependsOn: ["${databaseAccess}", "${pendingIndex}", "${reportAccess}", "${tlsCacheAccess}", "${ingress}"]
+      dependsOn: ["${databaseAccess}", "${pendingIndex}", "${reportAccess}", "${tlsCacheAccess}", "${ingress}", "${startupLogging}"]
 outputs:
   archiveSHA256: ${archiveSHA256}
   archiveObject: ${archive.name}

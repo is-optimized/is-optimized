@@ -6,9 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"regexp"
+	"strings"
+	"syscall"
 	"time"
 
 	"cloud.google.com/go/compute/metadata"
@@ -19,34 +22,15 @@ import (
 // Metadata includes only configuration and secret resource names, never values.
 func loadRuntimeConfig(ctx context.Context) error {
 	if os.Getenv("CONFIG_FROM_METADATA") == "true" {
-		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		defer cancel()
-		value, e := metadata.GetWithContext(ctx, "instance/attributes/is-optimized-config")
-		if e != nil {
-			return errors.New("runtime metadata configuration unavailable")
-		}
-		var config map[string]string
-		if json.Unmarshal([]byte(value), &config) != nil {
-			return errors.New("invalid runtime metadata configuration")
-		}
-		allowed := map[string]bool{}
-		for _, k := range []string{"PUBLIC_URL", "GCP_PROJECT_ID", "GCS_REPORT_BUCKET", "TRUSTED_PROXY_CIDRS", "SMS_ENABLED", "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN_SECRET", "TWILIO_FROM", "CONSENT_DISCLOSURE", "CONSENT_VERSION", "SMS_REQUEST_WORDING", "HTTPS_ENABLED", "ACME_EMAIL", "ACME_HOSTS", "ACME_DIRECTORY_URL", "GCS_TLS_BUCKET"} {
-			allowed[k] = true
-		}
-		for k, v := range config {
-			if !allowed[k] {
-				return errors.New("unsupported metadata configuration key")
-			}
-			if e := os.Setenv(k, v); e != nil {
-				return e
-			}
+		if err := loadMetadataConfig(ctx, metadata.GetWithContext, defaultMetadataRetryPolicy); err != nil {
+			return err
 		}
 	}
 	resource := os.Getenv("TWILIO_AUTH_TOKEN_SECRET")
 	if resource == "" {
 		return nil
 	}
-	if !regexp.MustCompile(`^projects/[a-zA-Z0-9_-]+/secrets/[a-zA-Z0-9_-]+/versions/[0-9]+$`).MatchString(resource) {
+	if !secretVersion.MatchString(resource) {
 		return errors.New("secret reference must pin a numeric version")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -82,3 +66,120 @@ func loadRuntimeConfig(ctx context.Context) error {
 	}
 	return os.Setenv("TWILIO_AUTH_TOKEN", string(token))
 }
+
+// Metadata can be transiently unreachable while a cold guest establishes its
+// network. This policy bounds that wait; it is not evidence of the failure's cause.
+type metadataRetryPolicy struct {
+	totalTimeout, attemptTimeout, initialBackoff, maxBackoff time.Duration
+}
+
+var defaultMetadataRetryPolicy = metadataRetryPolicy{
+	totalTimeout: 60 * time.Second, attemptTimeout: 5 * time.Second,
+	initialBackoff: time.Second, maxBackoff: 5 * time.Second,
+}
+
+type metadataGetter func(context.Context, string) (string, error)
+
+var (
+	errMetadataUnavailable = errors.New("runtime metadata unavailable")
+	errMetadataInvalid     = errors.New("runtime metadata configuration is invalid")
+	errMetadataUnsupported = errors.New("runtime metadata contains an unsupported key")
+)
+
+func loadMetadataConfig(parent context.Context, get metadataGetter, policy metadataRetryPolicy) error {
+	if policy.totalTimeout <= 0 || policy.attemptTimeout <= 0 || policy.initialBackoff <= 0 || policy.maxBackoff < policy.initialBackoff {
+		return errors.New("invalid runtime metadata retry policy")
+	}
+	ctx, cancel := context.WithTimeout(parent, policy.totalTimeout)
+	defer cancel()
+	backoff := policy.initialBackoff
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		attempt, stop := context.WithTimeout(ctx, policy.attemptTimeout)
+		value, err := get(attempt, "instance/attributes/is-optimized-config")
+		attemptErr := attempt.Err()
+		stop()
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if err == nil && attemptErr != nil {
+			err = attemptErr
+		}
+		if err == nil {
+			return applyMetadataConfig(value)
+		}
+		if !transientMetadataError(err) {
+			return errMetadataUnavailable
+		}
+		timer := time.NewTimer(backoff)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+		if backoff < policy.maxBackoff {
+			backoff *= 2
+			if backoff > policy.maxBackoff {
+				backoff = policy.maxBackoff
+			}
+		}
+	}
+}
+
+func transientMetadataError(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var response *metadata.Error
+	if errors.As(err, &response) {
+		return response.Code == http.StatusRequestTimeout || response.Code == http.StatusTooManyRequests || response.Code >= 500 && response.Code <= 599
+	}
+	var network net.Error
+	if errors.As(err, &network) && (network.Timeout() || network.Temporary()) {
+		return true
+	}
+	return errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ECONNRESET) ||
+		errors.Is(err, syscall.ENETUNREACH) || errors.Is(err, syscall.EHOSTUNREACH) ||
+		errors.Is(err, syscall.ECONNABORTED) || errors.Is(err, syscall.EPIPE)
+}
+
+func applyMetadataConfig(value string) error {
+	var values map[string]string
+	if json.Unmarshal([]byte(value), &values) != nil || values == nil {
+		return errMetadataInvalid
+	}
+	// Validate the complete document before changing process configuration. JSON
+	// maps are unordered, so validation during application risks partial updates.
+	for key, value := range values {
+		if !metadataKeys[key] {
+			return errMetadataUnsupported
+		}
+		if strings.ContainsRune(value, 0) {
+			return errMetadataInvalid
+		}
+		if key == "TWILIO_AUTH_TOKEN_SECRET" && value != "" && !secretVersion.MatchString(value) {
+			return errMetadataInvalid
+		}
+	}
+	for key, value := range values {
+		// Keys come from a fixed allowlist and values have no NUL, the only
+		// invalid value for Setenv on this platform. No metadata value is logged.
+		if os.Setenv(key, value) != nil {
+			return errMetadataInvalid
+		}
+	}
+	return nil
+}
+
+var secretVersion = regexp.MustCompile(`^projects/[a-zA-Z0-9_-]+/secrets/[a-zA-Z0-9_-]+/versions/[0-9]+$`)
+
+var metadataKeys = func() map[string]bool {
+	allowed := map[string]bool{}
+	for _, key := range []string{"PUBLIC_URL", "GCP_PROJECT_ID", "GCS_REPORT_BUCKET", "TRUSTED_PROXY_CIDRS", "SMS_ENABLED", "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN_SECRET", "TWILIO_FROM", "CONSENT_DISCLOSURE", "CONSENT_VERSION", "SMS_REQUEST_WORDING", "HTTPS_ENABLED", "ACME_EMAIL", "ACME_HOSTS", "ACME_DIRECTORY_URL", "GCS_TLS_BUCKET"} {
+		allowed[key] = true
+	}
+	return allowed
+}()
