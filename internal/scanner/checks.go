@@ -149,6 +149,9 @@ func selectLinks(doc *html.Node, base *url.URL) []string {
 			return
 		}
 		lower := strings.ToLower(u.Path)
+		if lower == "/cdn-cgi" || strings.HasPrefix(lower, "/cdn-cgi/") {
+			return
+		}
 		for _, unsafe := range []string{"logout", "log-out", "signout", "sign-out", "delete", "remove", "unsubscribe", "checkout", "cart", "purchase", "buy-now", "/admin", "/login", "/signin"} {
 			if strings.Contains(lower, unsafe) {
 				return
@@ -472,6 +475,8 @@ func evaluate(p pageResult) []reportmodel.Finding {
 		evidence = p.page.Error
 	}
 	out = append(out, reportmodel.Finding{ID: "seo.hsts", Pillar: "seo", Title: "HTTPS transport policy", Status: observationStatus(p), URL: p.page.URL, Evidence: evidence})
+	out = append(out, readinessObservations(p)...)
+	annotateReadiness(out)
 	return out
 }
 func hasType(v any, kind string) bool {

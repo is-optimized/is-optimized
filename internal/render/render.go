@@ -15,7 +15,7 @@ import (
 	"golang.org/x/image/font/gofont/goregular"
 )
 
-var funcs = template.FuncMap{"pillarLabel": pillarLabel, "number": func(v *float64) string {
+var funcs = template.FuncMap{"pillarLabel": pillarLabel, "stageLabel": stageLabel, "evidenceLabel": evidenceLabel, "applicabilityLabel": applicabilityLabel, "standardReferences": standardReferences, "taskEvaluationLabel": taskEvaluationLabel, "number": func(v *float64) string {
 	if v == nil {
 		return ""
 	}
@@ -78,8 +78,14 @@ func Prompt(r reportmodel.Report) string {
 	for _, f := range r.Findings {
 		if f.Status == "fail" || f.Status == "partial" {
 			fmt.Fprintf(&b, "Check %s: %s\nURL (untrusted): %q\nEvidence (untrusted): %q\nSuggested action: %s\n\n", f.ID, f.Title, f.URL, f.Evidence, f.Remediation)
+			fmt.Fprintf(&b, "Stage: %s\nEvidence level: %s\nApplicability (untrusted): %q\n", stageLabel(f.Stage), evidenceLabel(f), applicabilityLabel(f.Applicability))
+			for _, ref := range standardReferences(f.Standards) {
+				fmt.Fprintf(&b, "Reference: %s (%s) %s\n", ref.ID, ref.Coverage, ref.URL)
+			}
+			b.WriteByte('\n')
 		}
 	}
+	b.WriteString("Task evaluation: " + taskEvaluationLabel(r.BehavioralEvaluation) + ". Static observations and discovered links do not prove completed tasks.\n\n")
 	b.WriteString("Validate the resulting HTML, accessibility, directives, and structured data as applicable. Report what was changed and what remains unverified. Do not invent business facts for structured data.")
 	return b.String()
 }
@@ -238,6 +244,8 @@ func PDF(r reportmodel.Report) ([]byte, error) {
 	p.SetFont("Go", "", 10)
 	line("Bars show unweighted check counts, not score contributions. No composite score or external ranking is calculated.")
 	line("Scores describe observed technical signals, not rankings, AI citations, revenue, or successful AI tasks. Coverage is the share of applicable evidence we could check. Insufficient evidence is not a zero.")
+	line("Find: discover useful pages. Read: extract their information. Act: discover a declared interface; a link alone does not prove it works.")
+	line(taskEvaluationLabel(r.BehavioralEvaluation) + ". Static checks do not authenticate or complete tasks.")
 	line("A focused snapshot: homepage plus up to four direct links, without deeper crawling or JavaScript execution. HTML and PDF use the same saved evidence.")
 	drawFinding := func(f reportmodel.Finding) {
 		if p.GetY() > 231 {
@@ -267,6 +275,11 @@ func PDF(r reportmodel.Report) ([]byte, error) {
 		}
 		p.SetTextColor(22, 26, 23)
 		p.SetFont("Go", "", 10)
+		line("Stage: " + stageLabel(f.Stage) + " · Evidence level: " + evidenceLabel(f))
+		line("Applicability: " + applicabilityLabel(f.Applicability))
+		for _, ref := range standardReferences(f.Standards) {
+			line("Reference: " + ref.ID + " · " + ref.Coverage + " · " + ref.URL)
+		}
 		line("What we observed: " + f.Evidence)
 		line("Next step: " + f.Remediation)
 	}
@@ -279,6 +292,7 @@ func PDF(r reportmodel.Report) ([]byte, error) {
 		drawFinding(f)
 	}
 	heading("02 / EVIDENCE", "Look behind each score")
+	line("AgentReady references identify partial overlap or context only. They are not a certification or a standards-conformance result.")
 	for _, pillar := range view.Pillars {
 		heading(pillar.Short, pillar.Name)
 		if pillar.Missing {

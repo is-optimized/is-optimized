@@ -19,7 +19,7 @@ import (
 	"github.com/is-optimized/is-optimized/internal/reportmodel"
 )
 
-const MethodologyVersion = "2026-10-v2"
+const MethodologyVersion = "2026-10-agentready-v1"
 const maxBody = 2 << 20
 
 type Scanner struct {
@@ -173,7 +173,7 @@ func (s *Scanner) Scan(ctx context.Context, domain string) (reportmodel.Report, 
 	if _, err = rand.Read(id); err != nil {
 		return reportmodel.Report{}, err
 	}
-	report := reportmodel.Report{ID: hex.EncodeToString(id), Domain: domain, StartedAt: time.Now().UTC(), MethodologyVersion: MethodologyVersion, SelectionPolicy: "home-links-document-order-v1"}
+	report := reportmodel.Report{ID: hex.EncodeToString(id), Domain: domain, StartedAt: time.Now().UTC(), MethodologyVersion: MethodologyVersion, SelectionPolicy: "home-links-document-order-v2", BehavioralEvaluation: "not_run"}
 	ss := &session{s: s, ctx: ctx, policies: map[string]policy{}}
 	start := time.Now()
 	home, fetchErr := ss.fetch("https://"+domain+"/", true, "")
@@ -220,6 +220,7 @@ func (s *Scanner) Scan(ctx context.Context, domain string) (reportmodel.Report, 
 		report.Findings = append(report.Findings, evaluate(p)...)
 	}
 	report.Findings = markDuplicates(report.Findings, pages)
+	annotateReadiness(report.Findings)
 	report.Pillars = score(report.Findings)
 	report.CompletedAt = time.Now().UTC()
 	return report, nil
