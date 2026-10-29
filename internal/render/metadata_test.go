@@ -19,13 +19,14 @@ func TestReadinessEvidenceAndLegacyPresentation(t *testing.T) {
 	r.Findings[1].EvidenceLevel = "observed_html"
 	r.Findings[1].Applicability = "Public page with <script>untrusted</script> metadata"
 	r.Findings[1].Standards = []reportmodel.StandardReference{{ID: "AR-READ-01", URL: "javascript:alert(1)", Coverage: "partial"}}
+	r.Findings[0].EvidenceLevel = "observed_response"
 	r.Findings = append(r.Findings, reportmodel.Finding{ID: "declared-interface", Pillar: "agent", Status: "information", Title: "Declared API", Stage: "act", EvidenceLevel: "discovered_interface", Applicability: "Only when the product exposes an action interface.", Standards: []reportmodel.StandardReference{{ID: "AR-ACT-02", URL: "https://attacker.invalid/", Coverage: "reference"}}})
 	before, _ := json.Marshal(r)
 	var html bytes.Buffer
 	if err := HTML(&html, r); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Observed HTML", "Discovered interface (not validated)", "Partial mapping", "Reference only", "Not recorded", "Task evaluation not run", "AR-READ-01", "https://www.agentready.org/", "&lt;script&gt;untrusted&lt;/script&gt;", "not certification"} {
+	for _, want := range []string{"Observed HTML", "Observed response", "Discovered interface (not validated)", "Partial mapping", "Reference only", "Not recorded", "Task evaluation not run", "AR-READ-01", "https://www.agentready.org/", "&lt;script&gt;untrusted&lt;/script&gt;", "not certification"} {
 		if !strings.Contains(html.String(), want) {
 			t.Errorf("report missing %q", want)
 		}

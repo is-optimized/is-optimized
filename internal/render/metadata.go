@@ -28,6 +28,8 @@ func evidenceLabel(f reportmodel.Finding) string {
 	switch f.EvidenceLevel {
 	case "observed_html":
 		return "Observed HTML"
+	case "observed_response":
+		return "Observed response"
 	case "discovered_interface":
 		return "Discovered interface (not validated)"
 	case "validated_contract":
