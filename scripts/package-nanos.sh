@@ -11,6 +11,9 @@ test -z "$(git status --porcelain)" || { echo 'Commit or remove source-tree chan
 source_commit=$(git rev-parse HEAD)
 go_toolchain=$(go version)
 printf '%s' "$go_toolchain" | grep -F 'go1.26.0' >/dev/null || { echo 'Expected pinned Go 1.26.0 toolchain' >&2; exit 2; }
+elf_build_info=$(go version -m "$elf")
+printf '%s\n' "$elf_build_info" | head -1 | grep -F 'go1.26.0' >/dev/null || { echo 'ELF build metadata does not report pinned Go 1.26.0' >&2; exit 2; }
+elf_toolchain=$(printf '%s\n' "$elf_build_info" | head -1 | sed 's/^.*: //')
 elf_sha256=$(shasum -a 256 "$elf" | awk '{print $1}')
 "$OPS_BIN" version | head -1 | grep -Fx 'Ops version: 0.1.47' >/dev/null
 python3 - "$elf" <<'PY'
@@ -42,7 +45,7 @@ p.touch(exist_ok=True)
 with p.open('r+b') as f:
     f.truncate(((size+unit-1)//unit)*unit)
 PY
-python3 - "$ARTIFACT_DIR" "$source_commit" "$go_toolchain" "$elf_sha256" "$image_sha256" "$image_bytes" <<'PY'
+python3 - "$ARTIFACT_DIR" "$source_commit" "$elf_toolchain" "$elf_sha256" "$image_sha256" "$image_bytes" <<'PY'
 from pathlib import Path
 import hashlib,json,sys,tarfile
 p=Path(sys.argv[1]);raw=p/'disk.raw'
