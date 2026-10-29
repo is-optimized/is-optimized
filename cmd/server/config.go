@@ -30,7 +30,7 @@ func loadRuntimeConfig(ctx context.Context) error {
 			return errors.New("invalid runtime metadata configuration")
 		}
 		allowed := map[string]bool{}
-		for _, k := range []string{"PUBLIC_URL", "GCP_PROJECT_ID", "GCS_REPORT_BUCKET", "TRUSTED_PROXY_CIDRS", "SMS_ENABLED", "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN_SECRET", "TWILIO_FROM", "CONSENT_DISCLOSURE", "CONSENT_VERSION", "SMS_REQUEST_WORDING"} {
+		for _, k := range []string{"PUBLIC_URL", "GCP_PROJECT_ID", "GCS_REPORT_BUCKET", "TRUSTED_PROXY_CIDRS", "SMS_ENABLED", "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN_SECRET", "TWILIO_FROM", "CONSENT_DISCLOSURE", "CONSENT_VERSION", "SMS_REQUEST_WORDING", "HTTPS_ENABLED", "ACME_EMAIL", "ACME_HOSTS", "ACME_DIRECTORY_URL", "GCS_TLS_BUCKET"} {
 			allowed[k] = true
 		}
 		for k, v := range config {
