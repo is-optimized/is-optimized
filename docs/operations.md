@@ -4,19 +4,19 @@ This is source preparation, not a deployed service. Review the current RFC and e
 
 ## Runtime qualification
 
-Pin Go, OPS, and Nanos using `infra/nanos/versions.json`. OPS and Nanos are not installed/qualified by this repository. Build the Linux ELF with CGO disabled, generate the nonsecret OPS configuration using `scripts/nanos-config.py --mode local|gcp --ca-dir <public-CA-only-directory> --image <absolute-task-image-path>`, and qualify the pinned OPS local image workflow against its documentation. Package a raw disk archive accepted by GCP and supply its local path as the Pulumi `imageArchive` input. Do not upload/create cloud images through OPS commands; Pulumi owns the bucket object, image, instance template, and instance group.
+Pin Go, OPS, and Nanos using `infra/nanos/versions.json`. OPS and Nanos are not installed/qualified by this repository. Build the Linux ELF with CGO disabled, generate the nonsecret OPS configuration using `scripts/nanos-config.py --mode local|gcp --ca-dir <public-CA-only-directory> --image <absolute-task-image-path>`, and qualify the pinned OPS local image workflow against its documentation. Package a raw disk archive accepted by GCP and supply its local path as the Pulumi `imageArchive` input. Do not upload/create cloud images through OPS commands; Pulumi owns the bucket object, image, and single VM.
 
 The current packaging configuration deliberately disables SMS. Secure runtime secret retrieval, workload identity, CA roots, clock behavior, Firestore/GCS connectivity and PDF font rendering must be demonstrated inside Nanos before enabling production. Never bake `TWILIO_AUTH_TOKEN` or a service-account private key into an image. Runtime environment injection is acceptable for local testing only; qualify the implemented ADC-authenticated Secret Manager retrieval path for the production image. Set TWILIO_AUTH_TOKEN_SECRET to a numeric resource version and grant the runtime identity access only to that secret.
 
 ## Infrastructure
 
-`infra/Pulumi.yaml` defines a VPC, private subnet, NAT, runtime identity, Firestore database, private report/image buckets, immutable image, managed instance group, health check, and HTTPS load balancer/certificate. The GCP provider is pinned. APIs must be enabled under the owning project's authority before use. Existing default Firestore databases must be reconciled with state rather than blindly created. Review all IAM and retention settings in a preview before apply.
+`infra/Pulumi.yaml` defines one e2-micro VM with a regional external IPv4, dedicated VPC/subnet, Cloudflare-only TCP 80/443 ingress, runtime identity, Firestore database, and private report/image/TLS-cache buckets. Origin TLS uses ACME HTTP-01. There is no NAT, load balancer, forwarding rule, or managed instance group. The GCP provider is pinned; the stack enables required APIs without disabling them on destroy. Existing default Firestore databases and named buckets must be reconciled with state rather than blindly created. Review all IAM, retention, and replacement actions in a full preview before apply.
 
-The default is one zonal instance: replacement causes a possible interruption. More instances in this zonal group do not create cross-zone resilience. Multi-zone acceptance remains a deliberate topology change, not an implication of `instanceCount=2`.
+The single zonal instance can be interrupted during replacement and has no automatic failover. The persistent IP remains stable across VM replacement. Cloudflare DNS must reach the origin before production ACME certificates can issue; preserve Cloudflare Full SSL and do not use Flexible mode. After validating the public certificate chain, consider a separate change to Full (strict).
 
 Supply actual project, region/zone, domain, reviewed image archive, machine size, and budget. The application retrieves nonsecret configuration, including the generated bucket name, from the Pulumi-managed instance metadata attribute. This allows one generic image without embedding cloud resource names. Add secret-access IAM and an approved managed-secret bootstrap before enabling SMS.
 
-Only GCP health-check/proxy ranges may reach backend TCP8080. Configure `TRUSTED_PROXY_CIDRS` to include the observed trusted ingress peer ranges **and the exact forwarding-rule address as /32**, because GCP appends the frontend address to X-Forwarded-For. The application walks the chain from the right until the first untrusted address. Validate this using actual ingress requests before accepting per-client limits. Do not configure 0.0.0.0/0 or trust a client-provided prefix.
+Only the reviewed Cloudflare IPv4 ranges may reach origin TCP 80/443. Configure `TRUSTED_PROXY_CIDRS` with those same ranges. Verify client attribution through real proxied requests before accepting per-client limits. Do not configure 0.0.0.0/0 or trust a client-provided prefix.
 
 ## Durable state
 
@@ -38,4 +38,4 @@ Record separate measurements for kernel boot, application readiness, GCP provisi
 
 ## Current deployment handoff
 
-See [deployment candidate and cost handoff](deployment-candidate.md) for the current authentication, budget, capacity, packaging, and resource-identity blockers. No infrastructure preview or runtime qualification has occurred.
+See [deployment candidate and cost handoff](deployment-candidate.md) for the current project, cost, packaging, and DNS cutover details. Source preparation is not proof of Pulumi preview/apply, Nanos boot, TLS issuance, or public acceptance; record each separately.
