@@ -2,16 +2,15 @@ package main
 
 import (
 	"context"
+	"log/slog"
+	"os"
+	"os/signal"
+	"syscall"
+
 	"github.com/is-optimized/is-optimized/internal/messaging"
 	"github.com/is-optimized/is-optimized/internal/scanner"
 	"github.com/is-optimized/is-optimized/internal/server"
 	"github.com/is-optimized/is-optimized/internal/store"
-	"log/slog"
-	"net/http"
-	"os"
-	"os/signal"
-	"syscall"
-	"time"
 )
 
 func main() {
@@ -49,22 +48,15 @@ func run() error {
 	if e != nil {
 		return e
 	}
+	runtime, e := newRuntimeEndpoints(ctx, app)
+	if e != nil {
+		return e
+	}
+	defer runtime.closeCache()
 	workerDone := make(chan struct{})
 	go func() { app.Run(ctx); close(workerDone) }()
-	srv := &http.Server{Addr: env("LISTEN_ADDR", ":8080"), Handler: app, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10}
-	done := make(chan error, 1)
-	go func() { slog.Info("service listening", "address", srv.Addr); done <- srv.ListenAndServe() }()
-	select {
-	case e = <-done:
-		cancel()
-	case <-ctx.Done():
-		stop, close := context.WithTimeout(context.Background(), 15*time.Second)
-		defer close()
-		e = srv.Shutdown(stop)
-	}
+	e = serveRuntime(ctx, runtime)
+	cancel()
 	<-workerDone
-	if e == http.ErrServerClosed {
-		return nil
-	}
 	return e
 }

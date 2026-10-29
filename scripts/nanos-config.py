@@ -28,7 +28,9 @@ env = {'LISTEN_ADDR': ':8080', 'SMS_ENABLED': 'false',
        'CONFIG_FROM_METADATA': 'true' if args.mode == 'gcp' else 'false'}
 if args.mode == 'local':
     env.update({'PUBLIC_URL': 'http://localhost:8080', 'DATA_DIR': '/data'})
-config = {'RunConfig': {'Memory': '1G', 'Ports': ['8080'], 'ImageName': str(args.image)},
+else:
+    env['HTTPS_ENABLED'] = 'true'
+config = {'RunConfig': {'Memory': '1G', 'Ports': ['80', '443'] if args.mode == 'gcp' else ['8080'], 'ImageName': str(args.image)},
           'MapDirs': {str(ca_dir): '/etc/ssl/certs'}, 'Env': env}
 if args.mode == 'gcp':
     config['CloudConfig'] = {'ImageName': 'is-optimized'}
