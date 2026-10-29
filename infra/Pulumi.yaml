@@ -1,9 +1,10 @@
 name: is-optimized
 runtime: yaml
-description: Reviewed GCP deployment definition; preview/apply require separate authorization.
+description: Single Nanos e2-micro pilot; review preview before applying.
 config:
   project:
     type: string
+    default: iono-run-512901
   region:
     type: string
     default: us-central1
@@ -12,14 +13,36 @@ config:
     default: us-central1-a
   domain:
     type: string
+    default: is-optimized.com
   imageArchive:
     type: string
-  instanceCount:
-    type: integer
-    default: 1
   machineType:
     type: string
     default: e2-micro
+  acmeEmail:
+    type: string
+    default: david@sire.run
+  acmeDirectoryURL:
+    type: string
+    default: https://acme-v02.api.letsencrypt.org/directory
+variables:
+  # https://www.cloudflare.com/ips-v4 — verify again before ingress/DNS cutover.
+  cloudflareIPv4:
+    - 173.245.48.0/20
+    - 103.21.244.0/22
+    - 103.22.200.0/22
+    - 103.31.4.0/22
+    - 141.101.64.0/18
+    - 108.162.192.0/18
+    - 190.93.240.0/20
+    - 188.114.96.0/20
+    - 197.234.240.0/22
+    - 198.41.128.0/17
+    - 162.158.0.0/15
+    - 104.16.0.0/13
+    - 104.24.0.0/14
+    - 172.64.0.0/13
+    - 131.0.72.0/22
 resources:
   provider:
     type: pulumi:providers:gcp
@@ -29,12 +52,46 @@ resources:
       zone: ${zone}
     options:
       version: 10.2.0
+  computeAPI:
+    type: gcp:projects:Service
+    properties:
+      project: ${project}
+      service: compute.googleapis.com
+      disableOnDestroy: false
+    options:
+      provider: ${provider}
+  firestoreAPI:
+    type: gcp:projects:Service
+    properties:
+      project: ${project}
+      service: firestore.googleapis.com
+      disableOnDestroy: false
+    options:
+      provider: ${provider}
+  storageAPI:
+    type: gcp:projects:Service
+    properties:
+      project: ${project}
+      service: storage.googleapis.com
+      disableOnDestroy: false
+    options:
+      provider: ${provider}
+  iamAPI:
+    type: gcp:projects:Service
+    properties:
+      project: ${project}
+      service: iam.googleapis.com
+      disableOnDestroy: false
+    options:
+      provider: ${provider}
   network:
     type: gcp:compute:Network
     properties:
+      name: is-optimized
       autoCreateSubnetworks: false
     options:
       provider: ${provider}
+      dependsOn: ["${computeAPI}"]
   subnet:
     type: gcp:compute:Subnetwork
     properties:
@@ -44,22 +101,6 @@ resources:
       privateIpGoogleAccess: true
     options:
       provider: ${provider}
-  router:
-    type: gcp:compute:Router
-    properties:
-      network: ${network.id}
-      region: ${region}
-    options:
-      provider: ${provider}
-  nat:
-    type: gcp:compute:RouterNat
-    properties:
-      router: ${router.name}
-      region: ${region}
-      natIpAllocateOption: AUTO_ONLY
-      sourceSubnetworkIpRangesToNat: ALL_SUBNETWORKS_ALL_IP_RANGES
-    options:
-      provider: ${provider}
   serviceAccount:
     type: gcp:serviceaccount:Account
     properties:
@@ -67,6 +108,7 @@ resources:
       displayName: is-optimized Nanos runtime
     options:
       provider: ${provider}
+      dependsOn: ["${iamAPI}"]
   database:
     type: gcp:firestore:Database
     properties:
@@ -77,6 +119,7 @@ resources:
     options:
       provider: ${provider}
       protect: true
+      dependsOn: ["${firestoreAPI}"]
   databaseAccess:
     type: gcp:projects:IAMMember
     properties:
@@ -100,6 +143,8 @@ resources:
   reports:
     type: gcp:storage:Bucket
     properties:
+      name: ${project}-is-optimized-reports
+      forceDestroy: false
       location: ${region}
       uniformBucketLevelAccess: true
       publicAccessPrevention: enforced
@@ -111,6 +156,7 @@ resources:
     options:
       provider: ${provider}
       protect: true
+      dependsOn: ["${storageAPI}"]
   reportAccess:
     type: gcp:storage:BucketIAMMember
     properties:
@@ -122,12 +168,15 @@ resources:
   images:
     type: gcp:storage:Bucket
     properties:
+      name: ${project}-is-optimized-images
+      forceDestroy: false
       location: ${region}
       uniformBucketLevelAccess: true
       publicAccessPrevention: enforced
     options:
       provider: ${provider}
       protect: true
+      dependsOn: ["${storageAPI}"]
   archive:
     type: gcp:storage:BucketObject
     properties:
@@ -143,108 +192,99 @@ resources:
         source: https://storage.googleapis.com/${images.name}/${archive.name}
     options:
       provider: ${provider}
+      dependsOn: ["${computeAPI}"]
+  tlsCache:
+    type: gcp:storage:Bucket
+    properties:
+      name: ${project}-is-optimized-tls
+      location: ${region}
+      uniformBucketLevelAccess: true
+      publicAccessPrevention: enforced
+      forceDestroy: false
+    options:
+      provider: ${provider}
+      protect: true
+      dependsOn: ["${storageAPI}"]
+  tlsCacheAccess:
+    type: gcp:storage:BucketIAMMember
+    properties:
+      bucket: ${tlsCache.name}
+      role: roles/storage.objectUser
+      member: serviceAccount:${serviceAccount.email}
+    options:
+      provider: ${provider}
   ingress:
     type: gcp:compute:Firewall
     properties:
+      name: is-optimized-cloudflare-web
       network: ${network.id}
-      sourceRanges: [35.191.0.0/16, 130.211.0.0/22]
+      sourceRanges: ${cloudflareIPv4}
       targetServiceAccounts: ["${serviceAccount.email}"]
       allows:
         - protocol: tcp
-          ports: ['8080']
+          ports: ['80', '443']
     options:
       provider: ${provider}
   address:
-    type: gcp:compute:GlobalAddress
+    type: gcp:compute:Address
+    properties:
+      name: is-optimized-origin
+      region: ${region}
+      addressType: EXTERNAL
+      networkTier: PREMIUM
     options:
       provider: ${provider}
-  template:
-    type: gcp:compute:InstanceTemplate
+      dependsOn: ["${computeAPI}"]
+  instance:
+    type: gcp:compute:Instance
     properties:
+      name: is-optimized
+      zone: ${zone}
+      machineType: ${machineType}
+      allowStoppingForUpdate: true
+      bootDisk:
+        autoDelete: true
+        initializeParams:
+          image: ${image.selfLink}
+          size: 10
+          type: pd-standard
       metadata:
+        block-project-ssh-keys: 'true'
+        serial-port-enable: 'false'
         is-optimized-config:
           fn::toJSON:
             PUBLIC_URL: https://${domain}
             GCP_PROJECT_ID: ${project}
             GCS_REPORT_BUCKET: ${reports.name}
+            GCS_TLS_BUCKET: ${tlsCache.name}
             SMS_ENABLED: 'false'
-            TRUSTED_PROXY_CIDRS: 35.191.0.0/16,130.211.0.0/22,${address.address}/32
-      machineType: ${machineType}
-      disks:
-        - sourceImage: ${image.selfLink}
-          boot: true
-          autoDelete: true
+            HTTPS_ENABLED: 'true'
+            ACME_EMAIL: ${acmeEmail}
+            ACME_HOSTS: ${domain},www.${domain}
+            ACME_DIRECTORY_URL: ${acmeDirectoryURL}
+            TRUSTED_PROXY_CIDRS:
+              fn::join: [',', '${cloudflareIPv4}']
       networkInterfaces:
         - network: ${network.id}
           subnetwork: ${subnet.id}
+          accessConfigs:
+            - natIp: ${address.address}
+              networkTier: PREMIUM
       serviceAccount:
         email: ${serviceAccount.email}
         scopes: [cloud-platform]
+      scheduling:
+        automaticRestart: true
+        onHostMaintenance: MIGRATE
+        provisioningModel: STANDARD
     options:
       provider: ${provider}
-  health:
-    type: gcp:compute:HealthCheck
-    properties:
-      httpHealthCheck:
-        port: 8080
-        requestPath: /healthz
-    options:
-      provider: ${provider}
-  group:
-    type: gcp:compute:InstanceGroupManager
-    properties:
-      baseInstanceName: is-optimized
-      zone: ${zone}
-      targetSize: ${instanceCount}
-      versions:
-        - instanceTemplate: ${template.id}
-      namedPorts:
-        - name: http
-          port: 8080
-      autoHealingPolicies:
-        healthCheck: ${health.id}
-        initialDelaySec: 60
-    options:
-      provider: ${provider}
-  backend:
-    type: gcp:compute:BackendService
-    properties:
-      protocol: HTTP
-      portName: http
-      healthChecks: ["${health.id}"]
-      backends:
-        - group: ${group.instanceGroup}
-    options:
-      provider: ${provider}
-  routes:
-    type: gcp:compute:URLMap
-    properties:
-      defaultService: ${backend.id}
-    options:
-      provider: ${provider}
-  certificate:
-    type: gcp:compute:ManagedSslCertificate
-    properties:
-      managed:
-        domains: ["${domain}"]
-    options:
-      provider: ${provider}
-  proxy:
-    type: gcp:compute:TargetHttpsProxy
-    properties:
-      urlMap: ${routes.id}
-      sslCertificates: ["${certificate.id}"]
-    options:
-      provider: ${provider}
-  frontend:
-    type: gcp:compute:GlobalForwardingRule
-    properties:
-      ipAddress: ${address.address}
-      target: ${proxy.id}
-      portRange: '443'
-    options:
-      provider: ${provider}
+      dependsOn: ["${databaseAccess}", "${pendingIndex}", "${reportAccess}", "${tlsCacheAccess}", "${ingress}"]
 outputs:
+  project: ${project}
+  zone: ${zone}
+  instance: ${instance.name}
   address: ${address.address}
   reportBucket: ${reports.name}
+  tlsBucket: ${tlsCache.name}
   runtimeIdentity: ${serviceAccount.email}

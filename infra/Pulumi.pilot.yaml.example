@@ -1,0 +1,11 @@
+# Copy to the coordinator-selected stack file only after confirming backend ownership.
+# Cloud credentials come from the authenticated provider environment, never this file.
+config:
+  is-optimized:project: iono-run-512901
+  is-optimized:region: us-central1
+  is-optimized:zone: us-central1-a
+  is-optimized:domain: is-optimized.com
+  is-optimized:machineType: e2-micro
+  is-optimized:acmeEmail: david@sire.run
+  is-optimized:acmeDirectoryURL: https://acme-v02.api.letsencrypt.org/directory
+  is-optimized:imageArchive: /Volumes/BuildOffload/artifacts/is-optimized-release-20261028/image.tar.gz
