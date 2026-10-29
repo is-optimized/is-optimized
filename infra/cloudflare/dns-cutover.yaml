@@ -9,7 +9,7 @@ records:
     type: A
     name: is-optimized.com
     before: 192.64.119.176
-    desired: REPLACE_WITH_REVIEWED_GCP_ADDRESS_OUTPUT
+    desired: 34.46.58.201
     proxied: true
     ttl: 1
   - id: 61ffe5ea74e051301b956ffdd1944f90
