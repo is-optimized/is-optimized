@@ -111,6 +111,19 @@ func TestReadinessUnavailablePageHasNoObservedEvidenceLevel(t *testing.T) {
 	}
 }
 
+func TestReadinessResponseProvenanceIsDistinctFromHTML(t *testing.T) {
+	p := readinessPage(t, `<title>Example</title><main><h1>Public information</h1><p>Useful public content.</p></main>`)
+	findings := evaluate(p)
+	for _, id := range []string{"seo.access", "geo.access", "seo.index", "seo.hsts"} {
+		if f := readinessByID(t, findings, id); f.EvidenceLevel != "observed_response" {
+			t.Errorf("%s response evidence mislabeled: %+v", id, f)
+		}
+	}
+	if f := readinessByID(t, findings, "seo.title"); f.EvidenceLevel != "observed_html" {
+		t.Errorf("title HTML evidence mislabeled: %+v", f)
+	}
+}
+
 func TestReadinessRejectsUnsafeOrCredentialBearingLinks(t *testing.T) {
 	base, _ := url.Parse("https://example.com/docs/")
 	for _, raw := range []string{"javascript:alert(1)", "data:text/html,evil", "file:///etc/passwd", "https://user:secret@example.com/openapi.json", "https://127.0.0.1/openapi.json", "https://169.254.169.254/openapi.json", "https://example.com/openapi.json?token=secret", "https://example.com/openapi.json#secret", "://"} {

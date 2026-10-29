@@ -252,7 +252,12 @@ func annotateReadiness(findings []reportmodel.Finding) {
 			}
 		}
 		if f.Status != "unknown" && f.EvidenceLevel == "" && f.ID != "seo.sitemap" && !strings.HasPrefix(f.ID, "agent.discovery") {
-			f.EvidenceLevel = "observed_html"
+			switch f.ID {
+			case "seo.access", "geo.access", "seo.index", "seo.hsts", "seo.page_status":
+				f.EvidenceLevel = "observed_response"
+			default:
+				f.EvidenceLevel = "observed_html"
+			}
 		}
 		if len(f.Standards) > 0 {
 			continue
