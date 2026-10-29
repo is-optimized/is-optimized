@@ -19,7 +19,7 @@ config:
     default: 1
   machineType:
     type: string
-    default: e2-small
+    default: e2-micro
 resources:
   provider:
     type: pulumi:providers:gcp
