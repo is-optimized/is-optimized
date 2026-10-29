@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -74,6 +75,11 @@ func (c *Cloud) Update(ctx context.Context, k string, fn func(json.RawMessage) (
 		b, e := json.Marshal(v)
 		if e != nil {
 			return e
+		}
+		// A transaction with no writes still validates the snapshot without
+		// sending a document write or changing its timestamp on idle polls.
+		if bytes.Equal(raw, b) {
+			return nil
 		}
 		if len(b) > 850000 {
 			return errors.New("record too large")
