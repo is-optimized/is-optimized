@@ -26,6 +26,15 @@ config:
     type: string
     default: https://acme-v02.api.letsencrypt.org/directory
 variables:
+  # Derive identity from bytes on disk, never from a manually supplied version.
+  archiveSHA256:
+    fn::invoke:
+      function: std:filesha256
+      arguments:
+        input: ${imageArchive}
+      options:
+        version: 2.3.2
+      return: result
   # https://www.cloudflare.com/ips-v4 — verify again before ingress/DNS cutover.
   cloudflareIPv4:
     - 173.245.48.0/20
@@ -180,18 +189,23 @@ resources:
   archive:
     type: gcp:storage:BucketObject
     properties:
+      name: images/${archiveSHA256}/image.tar.gz
       bucket: ${images.name}
       source:
         fn::fileAsset: ${imageArchive}
     options:
       provider: ${provider}
+      retainOnDelete: true
   image:
     type: gcp:compute:Image
     properties:
+      description: Archive SHA-256 ${archiveSHA256}
       rawDisk:
         source: https://storage.googleapis.com/${images.name}/${archive.name}
     options:
       provider: ${provider}
+      retainOnDelete: true
+      replaceOnChanges: [rawDisk.source]
       dependsOn: ["${computeAPI}"]
   tlsCache:
     type: gcp:storage:Bucket
@@ -281,6 +295,10 @@ resources:
       provider: ${provider}
       dependsOn: ["${databaseAccess}", "${pendingIndex}", "${reportAccess}", "${tlsCacheAccess}", "${ingress}"]
 outputs:
+  archiveSHA256: ${archiveSHA256}
+  archiveObject: ${archive.name}
+  imageId: ${image.id}
+  imageSelfLink: ${image.selfLink}
   project: ${project}
   zone: ${zone}
   instance: ${instance.name}
