@@ -166,6 +166,7 @@ func (s *Server) inbound(w http.ResponseWriter, r *http.Request) {
 		ack(w)
 		return
 	}
+	wake(s.messageWake)
 	ack(w)
 }
 func (s *Server) dispatchMessages(ctx context.Context) {

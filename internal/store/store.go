@@ -2,6 +2,7 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -74,11 +75,14 @@ func (l *Local) Update(ctx context.Context, k string, fn func(json.RawMessage) (
 	if e != nil {
 		return e
 	}
-	b, e = json.Marshal(v)
+	next, e := json.Marshal(v)
 	if e != nil {
 		return e
 	}
-	return atomicWrite(p+".json", b)
+	if bytes.Equal(b, next) {
+		return nil
+	}
+	return atomicWrite(p+".json", next)
 }
 func atomicWrite(p string, b []byte) error {
 	f, e := os.CreateTemp(filepath.Dir(p), ".write-")

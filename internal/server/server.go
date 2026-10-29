@@ -33,15 +33,17 @@ type Config struct {
 	SMS                                                                                          bool
 }
 type Server struct {
-	db     store.Store
-	scan   Scanner
-	sender messaging.Sender
-	cfg    Config
-	mux    *http.ServeMux
-	slots  chan struct{}
-	mu     sync.Mutex
-	rates  map[string][]time.Time
-	wg     sync.WaitGroup
+	db          store.Store
+	scan        Scanner
+	sender      messaging.Sender
+	cfg         Config
+	mux         *http.ServeMux
+	slots       chan struct{}
+	mu          sync.Mutex
+	rates       map[string][]time.Time
+	wg          sync.WaitGroup
+	scanWake    chan struct{}
+	messageWake chan struct{}
 }
 type Job struct {
 	ID, Domain, State, Lease, Error string
@@ -88,6 +90,8 @@ func New(db store.Store, scan Scanner, sender messaging.Sender, cfg Config) (*Se
 		return nil, errors.New("SMS needs HTTPS, provider configuration, versioned disclosure, and sender")
 	}
 	s := &Server{db: db, scan: scan, sender: sender, cfg: cfg, mux: http.NewServeMux(), slots: make(chan struct{}, 4), rates: map[string][]time.Time{}}
+	s.scanWake = make(chan struct{}, 1)
+	s.messageWake = make(chan struct{}, 1)
 	s.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
 	s.mux.HandleFunc("GET /{$}", s.home)
 	s.mux.HandleFunc("GET /assets/{name}", render.Asset)
@@ -233,6 +237,7 @@ func (s *Server) createScan(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "scan capacity unavailable", 503)
 		return
 	}
+	wake(s.scanWake)
 	jsonOut(w, 202, map[string]string{"id": job.ID, "state": job.State})
 }
 func (s *Server) scanStatus(w http.ResponseWriter, r *http.Request) {
@@ -259,34 +264,53 @@ func (s *Server) scanStatus(w http.ResponseWriter, r *http.Request) {
 	jsonOut(w, 200, map[string]any{"id": j.ID, "state": j.State, "error": j.Error})
 }
 func (s *Server) Run(ctx context.Context) {
+	s.run(ctx, 30*time.Second)
+}
+
+// Wakeups handle local work immediately; periodic polling recovers persisted
+// work after a crash, expired leases, failed writes, or another instance's work.
+// Timers are independent of wakeups, so steady traffic cannot starve recovery.
+func (s *Server) run(ctx context.Context, recoveryInterval time.Duration) {
 	// A single independently scheduled message worker bounds provider traffic
 	// without allowing SMS latency to delay scan admission/recovery.
 	messageDone := make(chan struct{})
 	go func() {
 		defer close(messageDone)
-		ticker := time.NewTicker(time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				s.dispatchMessages(ctx)
-			}
-		}
+		runDispatcher(ctx, recoveryInterval, s.messageWake, s.dispatchMessages)
 	}()
-	ticker := time.NewTicker(time.Second)
+	runDispatcher(ctx, recoveryInterval, s.scanWake, func(ctx context.Context) {
+		s.recoverPublishing(ctx)
+		s.dispatch(ctx)
+	})
+	s.wg.Wait()
+	<-messageDone
+}
+
+func wake(ch chan struct{}) {
+	select {
+	case ch <- struct{}{}:
+	default:
+	}
+}
+
+func runDispatcher(ctx context.Context, interval time.Duration, wake <-chan struct{}, dispatch func(context.Context)) {
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+	// Recover immediately on startup, without waiting for the first tick.
+	if ctx.Err() == nil {
+		dispatch(ctx)
+	}
 	for {
 		select {
 		case <-ctx.Done():
-			s.wg.Wait()
-			<-messageDone
 			return
 		case <-ticker.C:
-			s.recoverPublishing(ctx)
-			s.dispatch(ctx)
+		case <-wake:
 		}
+		if ctx.Err() != nil {
+			return
+		}
+		dispatch(ctx)
 	}
 }
 func (s *Server) dispatch(ctx context.Context) {
@@ -332,7 +356,11 @@ func (s *Server) dispatch(ctx context.Context) {
 			return
 		}
 		s.wg.Add(1)
-		go func(j Job) { defer s.wg.Done(); defer func() { <-s.slots }(); s.work(ctx, j) }(claimed)
+		go func(j Job) {
+			defer s.wg.Done()
+			defer func() { <-s.slots; wake(s.scanWake) }()
+			s.work(ctx, j)
+		}(claimed)
 	}
 }
 func (s *Server) work(ctx context.Context, j Job) {
