@@ -1,5 +1,15 @@
 # Verification map and outstanding acceptance
 
+## Latest accepted web-pilot release — 2026-10-30 UTC
+
+The [cold-start recovery receipt](cold-start-recovery-20261029.md#verified-recovery--2026-10-30-utc) supersedes the historical candidate statuses below. PR2 delivered readiness evidence, PR3 added boot diagnostics, and PR4 delivered bounded metadata bootstrap and native GCP console logging. Source `b91784c3fc7d7d5d370cf1b8d96a70e7e76b94d2` matches landed `513c41ed5ff1a1f64032f8a79261e833346ea55c` exactly by tree.
+
+Observed: independent source review, GitHub checks, Linux targeted/aggregate race tests, vet, static build, pinned OPS/Nanos packaging, exact-image delayed-metadata QEMU boot, reviewed Pulumi deployment, GCP startup logs, real scan persistence, and matching live HTML/PDF/latest routes. The generated PDF was extracted and its rendered first page inspected. Independent final HTTP and deployment-identity checks passed.
+
+The first deployment and its archive rollback failed to stay running. Recovery is now observed, while the initial failure's precise root cause remains unconfirmed. Browser visual interaction, sustained-load qualification and all live Twilio/Secret Manager/SMS gates remain pending. No SMS was sent, and the Twilio application was not submitted because the browser connector could not initialize. SMS remains disabled.
+
+The entries below preserve earlier delivery history; they do not describe the latest release's execution status.
+
 ## Source candidate
 
 The implementation is prepared on `feat/mvp`. The RFC is already merged via PR1. Do not treat this document, source review, or focused scanner tests as integrated build or deployment evidence.
