@@ -223,7 +223,7 @@ func newRuntimeEndpoints(ctx context.Context, app http.Handler) (runtimeEndpoint
 		for _, host := range o.hosts {
 			_, err := tlsConfig.GetCertificate(&tls.ClientHelloInfo{ServerName: host, SignatureSchemes: []tls.SignatureScheme{tls.ECDSAWithP256AndSHA256}, SupportedCurves: []tls.CurveID{tls.CurveP256}, CipherSuites: []uint16{tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256}})
 			if err != nil {
-				slog.Warn("origin certificate not yet available", "host", host, "error", err)
+				slog.Warn("origin certificate not yet available", "host", host, "reason", startupErrorCategory(err))
 			} else {
 				slog.Info("origin certificate available", "host", host)
 			}
