@@ -13,6 +13,9 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"runtime"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -46,9 +49,9 @@ type Server struct {
 	messageWake chan struct{}
 }
 type Job struct {
-	ID, Domain, State, Lease, Error string
-	Created, Updated, LeaseUntil    time.Time
-	Attempts                        int
+	ID, Domain, State, Lease, Error       string
+	Created, Started, Updated, LeaseUntil time.Time
+	Attempts                              int
 }
 type Queue struct{ Jobs map[string]Job }
 type Snapshot struct {
@@ -66,6 +69,24 @@ type Request struct {
 }
 
 var errConflict = errors.New("conflict")
+var errAdmissionFull = errors.New("scan admission limit reached")
+
+const (
+	scanWorkers            = 4
+	maxQueuedJobs          = 64 // Temporary storage guard; load testing must replace this with a measured limit.
+	minQueueServiceSamples = 8
+	queueServiceSamples    = 16
+	maxQueueWait           = 5 * time.Minute
+)
+
+func reportState(r reportmodel.Report) string {
+	for _, page := range r.Pages {
+		if page.StatusCode != http.StatusOK || page.Error != "" {
+			return "partial"
+		}
+	}
+	return "completed"
+}
 
 func id() string {
 	b := make([]byte, 18)
@@ -89,7 +110,7 @@ func New(db store.Store, scan Scanner, sender messaging.Sender, cfg Config) (*Se
 	if cfg.SMS && (u.Scheme != "https" || cfg.TwilioAccount == "" || cfg.TwilioToken == "" || cfg.TwilioFrom == "" || cfg.Disclosure == "" || cfg.DisclosureVersion == "" || sender == nil) {
 		return nil, errors.New("SMS needs HTTPS, provider configuration, versioned disclosure, and sender")
 	}
-	s := &Server{db: db, scan: scan, sender: sender, cfg: cfg, mux: http.NewServeMux(), slots: make(chan struct{}, 4), rates: map[string][]time.Time{}}
+	s := &Server{db: db, scan: scan, sender: sender, cfg: cfg, mux: http.NewServeMux(), slots: make(chan struct{}, scanWorkers), rates: map[string][]time.Time{}}
 	s.scanWake = make(chan struct{}, 1)
 	s.messageWake = make(chan struct{}, 1)
 	s.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
@@ -137,7 +158,7 @@ func decode(r *http.Request, v any) error {
 	}
 	return nil
 }
-func (s *Server) allow(r *http.Request) bool {
+func (s *Server) allow(r *http.Request) (bool, int) {
 	host := s.clientIP(r)
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -149,7 +170,11 @@ func (s *Server) allow(r *http.Request) bool {
 	}
 	a = a[cut:]
 	if len(a) >= 5 {
-		return false
+		retryAfter := int((a[0].Add(10*time.Minute).Sub(now) + time.Second - 1) / time.Second)
+		if retryAfter < 1 {
+			retryAfter = 1
+		}
+		return false, retryAfter
 	}
 	if len(s.rates) >= 10000 {
 		for k, v := range s.rates {
@@ -158,11 +183,11 @@ func (s *Server) allow(r *http.Request) bool {
 			}
 		}
 		if len(s.rates) >= 10000 {
-			return false
+			return false, 600
 		}
 	}
 	s.rates[host] = append(a, now)
-	return true
+	return true, 0
 }
 func (s *Server) createScan(w http.ResponseWriter, r *http.Request) {
 	var in struct {
@@ -177,19 +202,24 @@ func (s *Server) createScan(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "enter a public domain", 400)
 		return
 	}
-	if !s.allow(r) {
-		http.Error(w, "scan limit reached; try later", 429)
+	allowed, rateRetryAfter := s.allow(r)
+	if !allowed {
+		w.Header().Set("Retry-After", strconv.Itoa(rateRetryAfter))
+		slog.Warn("scan request rate limited", "retry_after_seconds", rateRetryAfter)
+		http.Error(w, "Scan limit reached; please retry in about "+strconv.Itoa(rateRetryAfter)+" seconds.", 429)
 		return
 	}
 	var latest struct{ ID string }
 	if s.db.Get(r.Context(), "latest_"+hash(domain), &latest) == nil {
 		var snap Snapshot
 		if s.db.Get(r.Context(), "report_"+latest.ID, &snap) == nil && time.Since(snap.Report.CompletedAt) < 24*time.Hour && snap.Report.MethodologyVersion == scanner.MethodologyVersion {
-			jsonOut(w, 200, map[string]any{"id": latest.ID, "state": "completed", "report": snap.Report})
+			snap.Report = reportmodel.ExpandPageReferences(snap.Report)
+			jsonOut(w, 200, map[string]any{"id": latest.ID, "state": reportState(snap.Report), "report": snap.Report})
 			return
 		}
 	}
 	var job Job
+	retryAfter := 0
 	now := time.Now().UTC()
 	e = s.db.Update(r.Context(), "queue", func(raw json.RawMessage) (any, error) {
 		q := Queue{}
@@ -208,16 +238,20 @@ func (s *Server) createScan(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		for k, j := range q.Jobs {
-			if (j.State == "completed" || j.State == "failed") && now.Sub(j.Updated) > time.Hour {
+			if (j.State == "completed" || j.State == "partial" || j.State == "failed") && now.Sub(j.Updated) > time.Hour {
 				delete(q.Jobs, k)
 			}
 		}
 		// Terminal history must not consume the bounded active queue.
-		for len(q.Jobs) >= 64 {
+		if estimate, known := projectedQueueWait(q); known && estimate > maxQueueWait {
+			retryAfter = int((estimate + time.Second - 1) / time.Second)
+			return nil, errAdmissionFull
+		}
+		for len(q.Jobs) >= maxQueuedJobs {
 			oldest := ""
 			var at time.Time
 			for k, j := range q.Jobs {
-				if j.State == "completed" || j.State == "failed" {
+				if j.State == "completed" || j.State == "partial" || j.State == "failed" {
 					if oldest == "" || j.Updated.Before(at) {
 						oldest = k
 						at = j.Updated
@@ -225,7 +259,7 @@ func (s *Server) createScan(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			if oldest == "" {
-				return nil, errConflict
+				return nil, errAdmissionFull
 			}
 			delete(q.Jobs, oldest)
 		}
@@ -234,12 +268,184 @@ func (s *Server) createScan(w http.ResponseWriter, r *http.Request) {
 		return q, nil
 	})
 	if e != nil {
-		http.Error(w, "scan capacity unavailable", 503)
+		if retryAfter > 0 {
+			w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
+		}
+		if errors.Is(e, errAdmissionFull) {
+			message := "We’re busy completing scans; please try again in a few minutes."
+			if retryAfter > 0 {
+				message = "We’re busy completing scans; please try again in about " + strconv.Itoa(retryAfter) + " seconds."
+			}
+			http.Error(w, message, http.StatusServiceUnavailable)
+			slog.Warn("scan admission unavailable", "reason", "measured_wait_or_storage_guard")
+		} else {
+			http.Error(w, "We couldn’t save your scan request. Please try again shortly.", http.StatusServiceUnavailable)
+			slog.Error("scan admission unavailable", "reason", "durable_store_unavailable")
+		}
 		return
 	}
+	slog.Info("scan admitted", "state", job.State)
 	wake(s.scanWake)
 	jsonOut(w, 202, map[string]string{"id": job.ID, "state": job.State})
 }
+
+// projectedQueueWait is unknown until there are enough completed service-time
+// observations. Before then, admission uses only the provisional durable-job
+// guard; it does not guess instance capacity from the worker count.
+func projectedQueueWait(q Queue) (time.Duration, bool) {
+	var running, queued int
+	var completed []Job
+	for _, j := range q.Jobs {
+		switch j.State {
+		case "running", "publishing":
+			running++
+		case "queued":
+			queued++
+		case "completed", "partial":
+			if !j.Started.IsZero() && j.Updated.After(j.Started) {
+				completed = append(completed, j)
+			}
+		}
+	}
+	service, known := queueServiceTime(completed)
+	if !known {
+		return 0, false
+	}
+	freeWorkers := scanWorkers - running
+	if freeWorkers < 0 {
+		freeWorkers = 0
+	}
+	waves := queued + 1 - freeWorkers
+	if waves <= 0 {
+		return 0, true
+	}
+	return time.Duration((waves+scanWorkers-1)/scanWorkers) * service, true
+}
+
+func queueServiceTime(completed []Job) (time.Duration, bool) {
+	if len(completed) < minQueueServiceSamples {
+		return 0, false
+	}
+	sort.Slice(completed, func(i, j int) bool { return completed[i].Updated.Before(completed[j].Updated) })
+	if len(completed) > queueServiceSamples {
+		completed = completed[len(completed)-queueServiceSamples:]
+	}
+	samples := make([]time.Duration, 0, len(completed))
+	for _, j := range completed {
+		samples = append(samples, j.Updated.Sub(j.Started))
+	}
+	sort.Slice(samples, func(i, j int) bool { return samples[i] < samples[j] })
+	index := (len(samples)*9+9)/10 - 1 // nearest-rank p90
+	service := samples[index]
+	if service < time.Second {
+		service = time.Second
+	}
+	return service, true
+}
+
+func sortJobsFIFO(jobs []Job) {
+	sort.Slice(jobs, func(i, j int) bool {
+		if jobs[i].Created.Equal(jobs[j].Created) {
+			return jobs[i].ID < jobs[j].ID
+		}
+		return jobs[i].Created.Before(jobs[j].Created)
+	})
+}
+
+// claimOldest uses the same FIFO order that the status endpoint reports.
+// Expired running leases remain eligible at their original queue position.
+func claimOldest(q *Queue, now time.Time) Job {
+	candidates := make([]Job, 0, len(q.Jobs))
+	for _, j := range q.Jobs {
+		if j.State == "queued" || (j.State == "running" && now.After(j.LeaseUntil)) {
+			candidates = append(candidates, j)
+		}
+	}
+	sortJobsFIFO(candidates)
+	for _, candidate := range candidates {
+		j := q.Jobs[candidate.ID]
+		if j.Attempts >= 3 {
+			j.State = "failed"
+			j.Error = "scan interrupted repeatedly"
+			j.Updated = now
+			q.Jobs[candidate.ID] = j
+			continue
+		}
+		j.State = "running"
+		if j.Started.IsZero() {
+			j.Started = now
+		}
+		j.Lease = id()
+		j.LeaseUntil = now.Add(2 * time.Minute)
+		j.Attempts++
+		j.Updated = now
+		q.Jobs[candidate.ID] = j
+		return j
+	}
+	return Job{}
+}
+
+func queuedJobWait(q Queue, key string) (time.Duration, bool) {
+	job, ok := q.Jobs[key]
+	if !ok || job.State != "queued" {
+		return 0, false
+	}
+	queued := make([]Job, 0)
+	running, completed := 0, make([]Job, 0)
+	for _, candidate := range q.Jobs {
+		switch candidate.State {
+		case "queued":
+			queued = append(queued, candidate)
+		case "running", "publishing":
+			running++
+		case "completed", "partial":
+			if !candidate.Started.IsZero() && candidate.Updated.After(candidate.Started) {
+				completed = append(completed, candidate)
+			}
+		}
+	}
+	sortJobsFIFO(queued)
+	position := 0
+	for i, candidate := range queued {
+		if candidate.ID == key {
+			position = i + 1
+			break
+		}
+	}
+	if position == 0 {
+		return 0, false
+	}
+	service, known := queueServiceTime(completed)
+	if !known {
+		return 0, false
+	}
+	freeWorkers := scanWorkers - running
+	if freeWorkers < 0 {
+		freeWorkers = 0
+	}
+	waves := position - freeWorkers
+	if waves <= 0 {
+		return 0, true
+	}
+	return time.Duration((waves+scanWorkers-1)/scanWorkers) * service, true
+}
+
+func queuePosition(q Queue, key string) int {
+	queued := make([]Job, 0)
+	for _, candidate := range q.Jobs {
+		if candidate.State == "queued" {
+			queued = append(queued, candidate)
+		}
+	}
+	sortJobsFIFO(queued)
+	for i, candidate := range queued {
+		if candidate.ID == key {
+			return i + 1
+		}
+	}
+	return 0
+}
+
 func (s *Server) scanStatus(w http.ResponseWriter, r *http.Request) {
 	key := r.PathValue("id")
 	if !store.KeyOK(key) {
@@ -248,7 +454,8 @@ func (s *Server) scanStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	var snap Snapshot
 	if s.db.Get(r.Context(), "report_"+key, &snap) == nil && time.Now().Before(snap.Expires) {
-		jsonOut(w, 200, map[string]any{"id": key, "state": "completed", "report": snap.Report})
+		snap.Report = reportmodel.ExpandPageReferences(snap.Report)
+		jsonOut(w, 200, map[string]any{"id": key, "state": reportState(snap.Report), "report": snap.Report})
 		return
 	}
 	var q Queue
@@ -261,7 +468,14 @@ func (s *Server) scanStatus(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	jsonOut(w, 200, map[string]any{"id": j.ID, "state": j.State, "error": j.Error})
+	status := map[string]any{"id": j.ID, "state": j.State, "error": j.Error}
+	if j.State == "queued" {
+		status["position"] = queuePosition(q, key)
+		if wait, known := queuedJobWait(q, key); known {
+			status["estimated_wait_seconds"] = int((wait + time.Second - 1) / time.Second)
+		}
+	}
+	jsonOut(w, 200, status)
 }
 func (s *Server) Run(ctx context.Context) {
 	s.run(ctx, 30*time.Second)
@@ -278,12 +492,59 @@ func (s *Server) run(ctx context.Context, recoveryInterval time.Duration) {
 		defer close(messageDone)
 		runDispatcher(ctx, recoveryInterval, s.messageWake, s.dispatchMessages)
 	}()
+	metricsDone := make(chan struct{})
+	go func() {
+		defer close(metricsDone)
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				s.logRuntimeMetrics(ctx)
+			}
+		}
+	}()
 	runDispatcher(ctx, recoveryInterval, s.scanWake, func(ctx context.Context) {
 		s.recoverPublishing(ctx)
 		s.dispatch(ctx)
 	})
 	s.wg.Wait()
 	<-messageDone
+	<-metricsDone
+}
+
+// logRuntimeMetrics uses bounded dimensions only; identifiers, phone numbers,
+// client addresses, and target domains are deliberately excluded.
+func (s *Server) logRuntimeMetrics(ctx context.Context) {
+	var q Queue
+	if err := s.db.Get(ctx, "queue", &q); err != nil && !errors.Is(err, store.ErrNotFound) {
+		slog.Warn("runtime_metrics", "store_available", false)
+		return
+	}
+	counts := map[string]int{"queued": 0, "running": 0, "publishing": 0, "completed": 0, "partial": 0, "failed": 0}
+	oldestAge := time.Duration(0)
+	now := time.Now().UTC()
+	for _, j := range q.Jobs {
+		if _, ok := counts[j.State]; ok {
+			counts[j.State]++
+		}
+		if j.State == "queued" {
+			age := now.Sub(j.Created)
+			if age > oldestAge {
+				oldestAge = age
+			}
+		}
+	}
+	var memory runtime.MemStats
+	runtime.ReadMemStats(&memory)
+	slog.Info("runtime_metrics", "store_available", true,
+		"queued_jobs", counts["queued"], "running_jobs", counts["running"],
+		"publishing_jobs", counts["publishing"], "completed_jobs_retained", counts["completed"],
+		"partial_jobs_retained", counts["partial"], "failed_jobs_retained", counts["failed"],
+		"oldest_queued_age_ms", oldestAge.Milliseconds(), "active_workers", len(s.slots), "worker_limit", cap(s.slots),
+		"heap_alloc_bytes", memory.HeapAlloc, "heap_objects", memory.HeapObjects, "gc_cycles", memory.NumGC, "goroutines", runtime.NumGoroutine())
 }
 
 func wake(ch chan struct{}) {
@@ -314,7 +575,7 @@ func runDispatcher(ctx context.Context, interval time.Duration, wake <-chan stru
 	}
 }
 func (s *Server) dispatch(ctx context.Context) {
-	for i := 0; i < 4; i++ {
+	for i := 0; i < scanWorkers; i++ {
 		select {
 		case s.slots <- struct{}{}:
 		default:
@@ -330,25 +591,7 @@ func (s *Server) dispatch(ctx context.Context) {
 					return nil, e
 				}
 			}
-			for k, j := range q.Jobs {
-				if j.State == "queued" || (j.State == "running" && now.After(j.LeaseUntil)) {
-					if j.Attempts >= 3 {
-						j.State = "failed"
-						j.Error = "scan interrupted repeatedly"
-						j.Updated = now
-						q.Jobs[k] = j
-						continue
-					}
-					j.State = "running"
-					j.Lease = id()
-					j.LeaseUntil = now.Add(2 * time.Minute)
-					j.Attempts++
-					j.Updated = now
-					q.Jobs[k] = j
-					claimed = j
-					break
-				}
-			}
+			claimed = claimOldest(&q, now)
 			return q, nil
 		})
 		if e != nil || claimed.ID == "" {
@@ -364,11 +607,16 @@ func (s *Server) dispatch(ctx context.Context) {
 	}
 }
 func (s *Server) work(ctx context.Context, j Job) {
-	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	started := time.Now()
+	slog.Info("scan worker started", "queue_wait_ms", started.Sub(j.Created).Milliseconds(), "attempt", j.Attempts)
+	// Leave time after the scanner's 60-second budget to persist partial
+	// evidence, render the artifact, and publish a terminal queue state.
+	ctx, cancel := context.WithTimeout(ctx, 75*time.Second)
 	defer cancel()
 	// Scan evidence survives rendering/storage failures. A retry only rerenders.
 	var rep reportmodel.Report
-	e := s.db.Get(ctx, "evidence_"+j.ID, &rep)
+	var stored reportmodel.Report
+	e := s.db.Get(ctx, "evidence_"+j.ID, &stored)
 	if e == store.ErrNotFound {
 		rep, e = s.scan.Scan(ctx, j.Domain)
 		if e == nil {
@@ -379,22 +627,26 @@ func (s *Server) work(ctx context.Context, j Job) {
 					if er := json.Unmarshal(raw, &prior); er != nil {
 						return nil, er
 					}
-					rep = prior
+					rep = reportmodel.ExpandPageReferences(prior)
 					return prior, nil
 				}
-				return rep, nil
+				return reportmodel.CompactPageReferences(rep), nil
 			})
 		}
+	} else if e == nil {
+		rep = reportmodel.ExpandPageReferences(stored)
 	}
 	artifact := j.ID + "_" + j.Lease
 	if e == nil {
+		pdfStarted := time.Now()
 		var b []byte
 		b, e = render.PDF(rep)
+		slog.Info("pdf_render_metrics", "duration_ms", time.Since(pdfStarted).Milliseconds(), "artifact_bytes", len(b), "success", e == nil)
 		if e == nil {
 			e = s.db.PutPDF(ctx, artifact, b)
 		}
 	}
-	snap := Snapshot{Report: rep, Expires: time.Now().Add(30 * 24 * time.Hour), Artifact: artifact}
+	snap := Snapshot{Report: reportmodel.CompactPageReferences(rep), Expires: time.Now().Add(30 * 24 * time.Hour), Artifact: artifact}
 	// Attempt artifacts are private until the queue lease transaction succeeds.
 	if e == nil {
 		e = s.db.Update(ctx, "attempt_"+artifact, func(json.RawMessage) (any, error) { return snap, nil })
@@ -427,6 +679,15 @@ func (s *Server) work(ctx context.Context, j Job) {
 	if err == nil && published {
 		s.publish(ctx, j, snap)
 	}
+	pageOK, pageError := 0, 0
+	for _, page := range rep.Pages {
+		if page.StatusCode == http.StatusOK && page.Error == "" {
+			pageOK++
+		} else {
+			pageError++
+		}
+	}
+	slog.Info("scan worker finished", "duration_ms", time.Since(started).Milliseconds(), "pages_selected", len(rep.Pages), "pages_successful", pageOK, "pages_with_error", pageError, "result_available", err == nil && published)
 }
 func (s *Server) publish(ctx context.Context, j Job, snap Snapshot) {
 	// Only a fenced publishing generation reaches this method. Publishing jobs
@@ -463,7 +724,7 @@ func (s *Server) publish(ctx context.Context, j Job, snap Snapshot) {
 		if !ok || cur.Lease != j.Lease {
 			return nil, errConflict
 		}
-		cur.State = "completed"
+		cur.State = reportState(snap.Report)
 		cur.Updated = time.Now().UTC()
 		q.Jobs[j.ID] = cur
 		return q, nil
@@ -488,6 +749,7 @@ func (s *Server) load(w http.ResponseWriter, r *http.Request, key string) (Snaps
 		http.Error(w, "Report expired. Visit the homepage to request a new scan.", 410)
 		return snap, false
 	}
+	snap.Report = reportmodel.ExpandPageReferences(snap.Report)
 	w.Header().Set("X-Robots-Tag", "noindex")
 	return snap, true
 }

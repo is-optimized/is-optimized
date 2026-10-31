@@ -63,10 +63,46 @@ type reportSummary struct {
 	Fixes               []reportmodel.Finding
 	Narrative           string
 	Selected, Responded int
+	Fetch               *fetchSummary
+}
+
+type fetchSummary struct {
+	Homepage, Median, Minimum, Maximum string
+	Count                              int
+}
+
+func fetchTiming(pages []reportmodel.Page) *fetchSummary {
+	var durations []int64
+	homepage := "Not observed"
+	for i, page := range pages {
+		if page.StatusCode != 200 || page.Error != "" || page.DurationMS < 0 {
+			continue
+		}
+		durations = append(durations, page.DurationMS)
+		if i == 0 {
+			homepage = formatDuration(page.DurationMS)
+		}
+	}
+	if len(durations) == 0 {
+		return nil
+	}
+	sort.Slice(durations, func(i, j int) bool { return durations[i] < durations[j] })
+	median := float64(durations[len(durations)/2])
+	if len(durations)%2 == 0 {
+		median = float64(durations[len(durations)/2-1]+durations[len(durations)/2]) / 2
+	}
+	return &fetchSummary{Homepage: homepage, Median: formatDuration(int64(median)), Minimum: formatDuration(durations[0]), Maximum: formatDuration(durations[len(durations)-1]), Count: len(durations)}
+}
+
+func formatDuration(ms int64) string {
+	if ms < 1000 {
+		return fmt.Sprintf("%d ms", ms)
+	}
+	return fmt.Sprintf("%.2f s", float64(ms)/1000)
 }
 
 func summarize(r reportmodel.Report) reportSummary {
-	v := reportSummary{Selected: len(r.Pages)}
+	v := reportSummary{Selected: len(r.Pages), Fetch: fetchTiming(r.Pages)}
 	definitions := []pillarSummary{
 		{ID: "seo", Name: "Search engine readiness", Short: "SEO", Question: "Can search engines read the essentials?", Missing: true},
 		{ID: "geo", Name: "Generative search readiness", Short: "GEO", Question: "Is your information clear and attributable?", Missing: true},

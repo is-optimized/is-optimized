@@ -6,7 +6,7 @@ A Go website-readiness audit and shareable HTML/PDF report service by Sire Run, 
 
 Go 1.26 is required. With no cloud settings, `go run ./cmd/server` uses a private `.data` directory and listens at `http://localhost:8080`. This local store is single-process development storage, not an HA substitute for Firestore. SMS is disabled by default.
 
-Submit a domain in the browser. The application examines its homepage and at most four directly linked pages, using a bounded SSRF-safe fetcher. Reports include SEO, GEO, and AI-agent readiness evidence, remediation, and coding-agent instructions. Findings identify find/read/act stages, applicability, evidence levels, and partial AgentReady reference mappings. New interface-discovery observations are informational; linked interfaces are not validated, and no agent task is executed. Read [the methodology](docs/methodology.md) before interpreting scores.
+Submit a domain in the browser. The application examines its homepage and up to 31 additional same-site pages selected from internal links and bounded sitemap discovery, with a two-hop link limit and an SSRF-safe fetcher. Reports include SEO, GEO, and AI-agent readiness evidence, remediation, and coding-agent instructions. Findings identify find/read/act stages, applicability, evidence levels, and partial AgentReady reference mappings. New interface-discovery observations are informational; linked interfaces are not validated, and no agent task is executed. Read [the methodology](docs/methodology.md) before interpreting scores.
 
 When execution capacity is admitted, run `go test -race ./...`, `go vet ./...`, and `CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o bin/server ./cmd/server`. These commands are verification instructions, not claims of successful execution in this delivery.
 
@@ -24,7 +24,6 @@ When execution capacity is admitted, run `go test -race ./...`, `go vet ./...`, 
 | `TWILIO_AUTH_TOKEN_SECRET` | Pinned Secret Manager version resource; production token retrieved through ADC |
 | `CONFIG_FROM_METADATA` | Set true in Nanos image to load Pulumi-managed nonsecret instance configuration |
 | `CONSENT_DISCLOSURE`, `CONSENT_VERSION` | Owner-supplied wording and immutable version identifier |
-| `SMS_REQUEST_WORDING` | Optional approved request template; `{domain}` and `{name}` substituted, correlation token appended internally |
 
 Twilio inbound URL: `/webhooks/twilio/inbound`; status callback URLs are generated per request. Signatures are checked against `PUBLIC_URL` plus the exact request URI. Configure provider opt-out support. A report request and optional marketing choice are separate data. This service sends report links only; it does not authorize or perform marketing campaigns or calls.
 

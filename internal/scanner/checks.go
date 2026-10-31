@@ -125,50 +125,104 @@ func selectLinks(doc *html.Node, base *url.URL) []string {
 	var links []string
 	seen := map[string]bool{base.String(): true}
 	walk(doc, func(n *html.Node) {
-		if len(links) == 4 || n.Type != html.ElementNode || n.Data != "a" || attr(n, "download") != "" {
+		if len(links) >= maxSitemapCandidates || n.Type != html.ElementNode || n.Data != "a" || hasAttr(n, "download") {
 			return
 		}
 		raw := strings.TrimSpace(attr(n, "href"))
 		if raw == "" {
 			return
 		}
-		u, e := base.Parse(raw)
-		if e != nil || validateURL(u) != nil || origin(u) != origin(base) || u.RawQuery != "" {
-			return
-		}
-		u.Fragment = ""
-		u.RawFragment = ""
-		if u.Path == "" {
-			u.Path = "/"
-		}
-		if strings.Contains(u.Path, "//") {
-			return
-		}
-		ext := strings.ToLower(path.Ext(u.Path))
-		if ext != "" && ext != ".html" && ext != ".htm" && ext != ".php" && ext != ".asp" && ext != ".aspx" {
-			return
-		}
-		lower := strings.ToLower(u.Path)
-		if lower == "/cdn-cgi" || strings.HasPrefix(lower, "/cdn-cgi/") {
-			return
-		}
-		for _, unsafe := range []string{"logout", "log-out", "signout", "sign-out", "delete", "remove", "unsubscribe", "checkout", "cart", "purchase", "buy-now", "/admin", "/login", "/signin"} {
-			if strings.Contains(lower, unsafe) {
-				return
-			}
-		}
-		// Treat an explicit download attribute, including the empty boolean form, as a download.
-		for _, a := range n.Attr {
-			if a.Key == "download" {
-				return
-			}
-		}
-		if !seen[u.String()] {
+		u, ok := candidateURL(raw, base)
+		if ok && !seen[u.String()] {
 			seen[u.String()] = true
 			links = append(links, u.String())
 		}
 	})
 	return links
+}
+
+func hasAttr(n *html.Node, key string) bool {
+	for _, a := range n.Attr {
+		if strings.EqualFold(a.Key, key) {
+			return true
+		}
+	}
+	return false
+}
+
+func candidateURL(raw string, base *url.URL) (*url.URL, bool) {
+	u, err := base.Parse(strings.TrimSpace(raw))
+	if err != nil || validateURL(u) != nil || origin(u) != origin(base) || u.RawQuery != "" || u.User != nil {
+		return nil, false
+	}
+	u.Fragment = ""
+	u.RawFragment = ""
+	if u.Path == "" {
+		u.Path = "/"
+	}
+	if strings.Contains(u.Path, "//") {
+		return nil, false
+	}
+	ext := strings.ToLower(path.Ext(u.Path))
+	if ext != "" && ext != ".html" && ext != ".htm" && ext != ".php" && ext != ".asp" && ext != ".aspx" {
+		return nil, false
+	}
+	lower := strings.ToLower(u.Path)
+	if lower == "/cdn-cgi" || strings.HasPrefix(lower, "/cdn-cgi/") {
+		return nil, false
+	}
+	for _, unsafe := range []string{"logout", "log-out", "signout", "sign-out", "delete", "remove", "unsubscribe", "checkout", "cart", "purchase", "buy-now", "/admin", "/login", "/signin"} {
+		if strings.Contains(lower, unsafe) {
+			return nil, false
+		}
+	}
+	return u, true
+}
+
+func selectRepresentative(candidates []string, base *url.URL, limit int) []string {
+	if limit <= 0 {
+		return nil
+	}
+	groups := make(map[string][]string)
+	var order []string
+	seen := map[string]bool{base.String(): true}
+	for _, raw := range candidates {
+		u, ok := candidateURL(raw, base)
+		if !ok || seen[u.String()] {
+			continue
+		}
+		seen[u.String()] = true
+		family := pageFamily(u.Path)
+		if _, ok := groups[family]; !ok {
+			order = append(order, family)
+		}
+		groups[family] = append(groups[family], u.String())
+	}
+	selected := make([]string, 0, limit)
+	for offset := 0; len(selected) < limit; offset++ {
+		added := false
+		for _, family := range order {
+			if offset < len(groups[family]) {
+				selected = append(selected, groups[family][offset])
+				added = true
+				if len(selected) == limit {
+					break
+				}
+			}
+		}
+		if !added {
+			break
+		}
+	}
+	return selected
+}
+
+func pageFamily(p string) string {
+	parts := strings.Split(strings.Trim(p, "/"), "/")
+	if len(parts) == 0 || parts[0] == "" {
+		return "/"
+	}
+	return strings.ToLower(parts[0])
 }
 
 type Check struct {
