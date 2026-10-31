@@ -14,7 +14,7 @@ import (
 
 func designFixture() reportmodel.Report {
 	seo, geo := 75.0, 50.0
-	return reportmodel.Report{ID: "design-fixture-20261027", Domain: "example.com", CompletedAt: time.Date(2026, 10, 27, 19, 0, 0, 0, time.UTC), MethodologyVersion: "fixture-only", SelectionPolicy: "homepage-direct-links-v1", Pages: []reportmodel.Page{{URL: "https://example.com", StatusCode: 200}, {URL: "https://example.com/about", StatusCode: 200}, {URL: "https://example.com/contact", Error: "Timed out; not observed"}}, Pillars: []reportmodel.Pillar{{ID: "seo", Name: "Search engine readiness", Score: &seo, Coverage: 1}, {ID: "geo", Name: "Generative search readiness", Score: &geo, Coverage: .85}, {ID: "agent", Name: "AI-agent readiness", Coverage: .6}}, Findings: []reportmodel.Finding{
+	return reportmodel.Report{ID: "design-fixture-20261027", Domain: "example.com", CompletedAt: time.Date(2026, 10, 27, 19, 0, 0, 0, time.UTC), MethodologyVersion: "fixture-only", SelectionPolicy: "homepage-direct-links-v1", Pages: []reportmodel.Page{{URL: "https://example.com", StatusCode: 200, DurationMS: 450}, {URL: "https://example.com/about", StatusCode: 200, DurationMS: 1550}, {URL: "https://example.com/contact", Error: "Timed out; not observed", DurationMS: 5000}}, Pillars: []reportmodel.Pillar{{ID: "seo", Name: "Search engine readiness", Score: &seo, Coverage: 1}, {ID: "geo", Name: "Generative search readiness", Score: &geo, Coverage: .85}, {ID: "agent", Name: "AI-agent readiness", Coverage: .6}}, Findings: []reportmodel.Finding{
 		{ID: "pass", Pillar: "seo", Status: "pass", Title: "A descriptive page title", URL: "https://example.com", Evidence: "Fixture title is readable in the initial HTML.", Remediation: "Keep the title specific to this page."},
 		{ID: "fix", Pillar: "seo", Status: "fail", Title: "Give each page a useful description", URL: "https://example.com/about", Evidence: "Fixture page has no meta description. Quoted content: <script>alert(1)</script>", Remediation: "Write a concise, accurate description of this page. Confirm the description is present in the initial HTML."},
 		{ID: "partial", Pillar: "geo", Status: "partial", Title: "Make the business identity explicit", URL: "https://example.com", Evidence: "Fixture structured data identifies a business but lacks a verified website reference.", Remediation: "Review the existing structured data against the visible business information. Add only facts you can verify."},
@@ -35,7 +35,7 @@ func TestRenderImmutableEvidence(t *testing.T) {
 	if strings.Index(html.String(), "Give each page") > strings.Index(html.String(), "A descriptive page title") {
 		t.Fatal("fixes not prioritized")
 	}
-	for _, expected := range []string{r.ID, "fixture-only", "Insufficient evidence", "https://sire.run/privacy/", "https://sire.run/terms/", "privacy@sire.run"} {
+	for _, expected := range []string{r.ID, "fixture-only", "Insufficient evidence", "https://sire.run/privacy/", "https://sire.run/terms/", "privacy@sire.run", "Observed HTML fetch time", "450 ms", "1.00 s"} {
 		if !strings.Contains(html.String(), expected) {
 			t.Fatal("missing report content", expected)
 		}
@@ -58,6 +58,21 @@ func TestRenderImmutableEvidence(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
+	}
+}
+
+func TestFetchTimingUsesSuccessfulHTMLOnly(t *testing.T) {
+	got := fetchTiming([]reportmodel.Page{
+		{StatusCode: 200, DurationMS: 100},
+		{StatusCode: 200, DurationMS: 200},
+		{StatusCode: 404, DurationMS: 900},
+		{StatusCode: 200, Error: "not HTML", DurationMS: 800},
+	})
+	if got == nil || got.Homepage != "100 ms" || got.Count != 2 || got.Median != "150 ms" || got.Minimum != "100 ms" || got.Maximum != "200 ms" {
+		t.Fatalf("unexpected fetch timing: %#v", got)
+	}
+	if fetchTiming([]reportmodel.Page{{StatusCode: 404, DurationMS: 50}}) != nil {
+		t.Fatal("unavailable page produced a speed summary")
 	}
 }
 

@@ -3,20 +3,22 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/is-optimized/is-optimized/internal/messaging"
 	"github.com/is-optimized/is-optimized/internal/store"
 )
 
-// Approved request copy. Correlation is appended internally, never supplied by a visitor.
-const ApprovedRequestWording = "Hi, please send me the free website audit report for {domain}. My name is {name}."
+// Approved customer-facing copy. Correlation is appended internally, never supplied by a visitor.
+const ApprovedDisclosure = "By entering your mobile number and sending the text message below, you agree that Sire Run, Inc. may contact you at that number by phone call, text message, and artificial or prerecorded voice (including voicemail drops) about AI services for your business. Consent is not required to receive the free website audit report or to purchase anything. Message and data rates may apply. Reply STOP to any text to opt out."
+const ApprovedDisclosureVersion = "2026-10-31-v1"
+const ApprovedRequestWording = "Hi, please send me the free website audit report for {domain}."
 
 var phonePattern = regexp.MustCompile(`^\+[1-9][0-9]{7,14}$`)
 var tokenPattern = regexp.MustCompile(`\b[a-f0-9]{36}\b`)
@@ -30,7 +32,6 @@ func (s *Server) requestReport(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		ReportID  string `json:"report_id"`
 		Marketing bool   `json:"marketing"`
-		Name      string `json:"name"`
 		Phone     string `json:"phone"`
 	}
 	if decode(r, &in) != nil {
@@ -41,25 +42,20 @@ func (s *Server) requestReport(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !s.allow(r) {
-		http.Error(w, "request limit reached", 429)
+	allowed, retryAfter := s.allow(r)
+	if !allowed {
+		w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
+		slog.Warn("report request rate limited", "retry_after_seconds", retryAfter)
+		http.Error(w, "Request limit reached; please retry in about "+strconv.Itoa(retryAfter)+" seconds.", 429)
 		return
 	}
 	in.Phone = strings.TrimSpace(in.Phone)
-	if in.Phone != "" && !phonePattern.MatchString(in.Phone) {
+	if !phonePattern.MatchString(in.Phone) {
 		http.Error(w, "invalid mobile phone number", 400)
 		return
 	}
-	name := strings.TrimSpace(in.Name)
-	if utf8.RuneCountInString(name) > 80 || strings.ContainsAny(name, "{}") || tokenPattern.MatchString(name) || strings.IndexFunc(name, unicode.IsControl) >= 0 {
-		http.Error(w, "Use a name of up to 80 characters, or leave it blank.", 400)
-		return
-	}
 	wording := s.cfg.SMSWording
-	if name == "" {
-		wording = strings.ReplaceAll(wording, " My name is {name}.", "")
-	}
-	wording = strings.NewReplacer("{domain}", snapshot.Report.Domain, "{name}", name).Replace(wording)
+	wording = strings.ReplaceAll(wording, "{domain}", snapshot.Report.Domain)
 	req := Request{IntendedPhone: in.Phone, Token: id(), ReportID: in.ReportID, Disclosure: s.cfg.Disclosure, DisclosureVersion: s.cfg.DisclosureVersion, Wording: wording, Marketing: in.Marketing, Created: time.Now().UTC(), Expires: time.Now().Add(30 * time.Minute), State: "unconsumed"}
 	if s.db.Update(r.Context(), "request_"+req.Token, func(raw json.RawMessage) (any, error) {
 		if len(raw) > 0 {

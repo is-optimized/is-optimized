@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -29,6 +30,12 @@ func TestBoundedDepthAndConcurrency(t *testing.T) {
 	var mu sync.Mutex
 	var requests []string
 	var active, peak atomic.Int32
+	var home strings.Builder
+	home.WriteString(`<main><h1>Home</h1>`)
+	for i := 1; i <= 40; i++ {
+		fmt.Fprintf(&home, `<a href="/p%02d">Page %d</a>`, i, i)
+	}
+	home.WriteString(`</main>`)
 	s := fixtureScanner(func(r *http.Request) (*http.Response, error) {
 		mu.Lock()
 		requests = append(requests, r.URL.Path)
@@ -40,7 +47,7 @@ func TestBoundedDepthAndConcurrency(t *testing.T) {
 			return reply(r, 404, "", "text/plain"), nil
 		}
 		if r.URL.Path == "/" {
-			return reply(r, 200, `<main><h1>Home</h1><a href="/a#x">A</a><a href="/a#y">Duplicate</a><a href="https://other.com/">Other</a><a href="/logout">Log out</a><a href="/search?q=1">Query</a><a href="/download.pdf">PDF</a><a href="/b">B</a><a href="/c">C</a><a href="/d">D</a><a href="/e">E</a></main>`, "text/html"), nil
+			return reply(r, 200, home.String(), "text/html"), nil
 		}
 		n := active.Add(1)
 		for {
@@ -57,26 +64,124 @@ func TestBoundedDepthAndConcurrency(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(report.Pages) != 5 {
+	if len(report.Pages) != maxContentPages {
 		t.Fatalf("pages=%d", len(report.Pages))
 	}
-	if peak.Load() != 4 {
-		t.Fatalf("want four concurrent children; got %d", peak.Load())
+	if peak.Load() != defaultPageConcurrency {
+		t.Fatalf("want up to %d concurrent page fetches; got %d", defaultPageConcurrency, peak.Load())
 	}
-	for i, p := range report.Pages {
-		want := []string{"/", "/a", "/b", "/c", "/d"}[i]
-		if !strings.HasSuffix(p.URL, want) {
-			t.Errorf("page %d: %s", i, p.URL)
+	seen := map[string]bool{}
+	for _, p := range report.Pages {
+		parsed, _ := url.Parse(p.URL)
+		seen[parsed.Path] = true
+	}
+	for _, want := range []string{"/", "/p01", "/p02", "/p03", "/p04", "/p05", "/p31"} {
+		if !seen[want] {
+			t.Errorf("missing sampled path %s", want)
 		}
 	}
 	for _, p := range requests {
-		if p == "/deep" || p == "/e" || p == "/logout" {
+		if p == "/logout" {
 			t.Errorf("unexpected fetch %s", p)
 		}
 	}
 	if requests[0] != "/robots.txt" {
 		t.Fatalf("first fetch was %s", requests[0])
 	}
+}
+
+func TestReadBudgetedStopsAtSharedByteLimit(t *testing.T) {
+	var total atomic.Int64
+	body, err := readBudgeted(strings.NewReader(strings.Repeat("x", 100)), &total, 100, 37)
+	if !errors.Is(err, errScanByteBudget) {
+		t.Fatalf("expected byte-budget error, got %v", err)
+	}
+	if len(body) != 37 || total.Load() != 37 {
+		t.Fatalf("read %d bytes, accounted %d; want 37", len(body), total.Load())
+	}
+}
+
+func TestScanPageCapAndConcurrencyBound(t *testing.T) {
+	var active, peak atomic.Int32
+	s := fixtureScanner(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path == "/robots.txt" || strings.HasPrefix(r.URL.Path, "/llms") {
+			return reply(r, 404, "", "text/plain"), nil
+		}
+		if r.URL.Path == "/" {
+			var links strings.Builder
+			for i := 0; i < 40; i++ {
+				fmt.Fprintf(&links, `<a href="/p%d">page</a>`, i)
+			}
+			return reply(r, 200, links.String(), "text/html"), nil
+		}
+		n := active.Add(1)
+		for {
+			p := peak.Load()
+			if n <= p || peak.CompareAndSwap(p, n) {
+				break
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+		active.Add(-1)
+		return reply(r, 200, `<h1>Page</h1>`, "text/html"), nil
+	})
+	report, err := s.Scan(context.Background(), "example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Pages) != maxContentPages {
+		t.Fatalf("want %d total pages, got %d", maxContentPages, len(report.Pages))
+	}
+	if peak.Load() > defaultPageConcurrency || peak.Load() < 2 {
+		t.Fatalf("observed page concurrency %d; expected 2..%d", peak.Load(), defaultPageConcurrency)
+	}
+}
+
+func TestScanSamplesDeclaredSitemapAndSecondHop(t *testing.T) {
+	var requests []string
+	s := fixtureScanner(func(r *http.Request) (*http.Response, error) {
+		requests = append(requests, r.URL.Path)
+		switch r.URL.Path {
+		case "/robots.txt":
+			return reply(r, 200, "User-agent: *\nSitemap: https://example.com/sitemap.xml\n", "text/plain"), nil
+		case "/sitemap.xml":
+			return reply(r, 200, `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://example.com/from-sitemap</loc></url></urlset>`, "application/xml"), nil
+		case "/":
+			return reply(r, 200, `<h1>Home</h1>`, "text/html"), nil
+		case "/from-sitemap":
+			return reply(r, 200, `<h1>Listed</h1><a href="/second-hop">Next</a>`, "text/html"), nil
+		case "/second-hop":
+			return reply(r, 200, `<h1>Second</h1>`, "text/html"), nil
+		case "/llms.txt", "/llms-full.txt":
+			return reply(r, 404, "", "text/plain"), nil
+		default:
+			return reply(r, 404, "", "text/plain"), nil
+		}
+	})
+	report, err := s.Scan(context.Background(), "example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, page := range report.Pages {
+		parsed, _ := url.Parse(page.URL)
+		seen[parsed.Path] = true
+	}
+	if !seen["/from-sitemap"] || !seen["/second-hop"] {
+		t.Fatalf("sitemap or second-hop page missing from sample: %#v", seen)
+	}
+	if !containsString(requests, "/sitemap.xml") {
+		t.Fatalf("declared sitemap not fetched: %#v", requests)
+	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 func TestRobotsBeforeRedirectOrigin(t *testing.T) {
 	var requests []string
@@ -213,13 +318,36 @@ func TestRedirectPrivateRejectedBeforeTransport(t *testing.T) {
 func TestRequestBudget(t *testing.T) {
 	s := fixtureScanner(func(r *http.Request) (*http.Response, error) { return reply(r, 200, "ok", "text/plain"), nil })
 	ss := &session{s: s, ctx: context.Background(), policies: map[string]policy{}}
-	for i := 0; i < 32; i++ {
+	for i := 0; i < maxRequestCount; i++ {
 		if _, e := ss.fetch("https://example.com/", false, ""); e != nil {
 			t.Fatal(e)
 		}
 	}
 	if _, e := ss.fetch("https://example.com/", false, ""); e == nil {
 		t.Fatal("request budget ignored")
+	}
+	if got := ss.requestBudgetExhaustions.Load(); got != 1 {
+		t.Fatalf("request budget exhaustion metric=%d, want 1", got)
+	}
+}
+func TestFetchBudgetExhaustionMetrics(t *testing.T) {
+	s := fixtureScanner(func(r *http.Request) (*http.Response, error) {
+		return reply(r, 200, strings.Repeat("x", maxBody+1), "text/html"), nil
+	})
+	bytesSession := &session{s: s, ctx: context.Background(), policies: map[string]policy{}}
+	bytesSession.bytes.Store(maxScanBytes)
+	if _, err := bytesSession.fetch("https://example.com/", false, ""); err == nil || !strings.Contains(err.Error(), "byte budget") {
+		t.Fatalf("expected scan byte budget error, got %v", err)
+	}
+	if got := bytesSession.scanByteBudgetExhaustions.Load(); got != 1 {
+		t.Fatalf("scan byte budget exhaustion metric=%d, want 1", got)
+	}
+	sizeSession := &session{s: s, ctx: context.Background(), policies: map[string]policy{}}
+	if _, err := sizeSession.fetch("https://example.com/", false, ""); err == nil || !strings.Contains(err.Error(), "size limit") {
+		t.Fatalf("expected response size error, got %v", err)
+	}
+	if got := sizeSession.responseSizeExhaustions.Load(); got != 1 {
+		t.Fatalf("response size exhaustion metric=%d, want 1", got)
 	}
 }
 func TestDiscoveryLimited(t *testing.T) {
@@ -234,6 +362,9 @@ func TestDiscoveryLimited(t *testing.T) {
 	}
 	if _, e := ss.probe("https://example.com/llms.txt", origin(u)); e == nil {
 		t.Fatal("discovery budget ignored")
+	}
+	if got := ss.discoveryBudgetExhaustions.Load(); got != 1 {
+		t.Fatalf("discovery budget exhaustion metric=%d, want 1", got)
 	}
 }
 

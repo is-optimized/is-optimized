@@ -1,6 +1,6 @@
 # MVP methodology and provenance
 
-This document records the independently implemented MVP check registry. It does not claim parity with the hosted Is Agentic service. The source of executable behavior is the registries and evaluation in `internal/scanner/checks.go` and `internal/scanner/readiness.go`; every score identifies methodology `2026-10-agentready-v1` and selection policy `home-links-document-order-v2`.
+This document records the independently implemented MVP check registry. It does not claim parity with the hosted Is Agentic service. The source of executable behavior is the registries and evaluation in `internal/scanner/checks.go` and `internal/scanner/readiness.go`. Current reports identify methodology `2026-10-agentready-v3` and selection policy `home-links-sitemap-two-hop-v2`; v1 and v2 reports retain the versions under which they were produced.
 
 ## Reference provenance
 
@@ -42,19 +42,19 @@ This inventory and fixture results are review evidence for the MVP, not empirica
 
 ## Informational probes
 
-`llms.txt`, `llms-full.txt`, and the first same-origin sitemap declared in the applicable robots policy are bounded informational probes. They do not award bonus points. The sitemap is fetched but not recursively traversed or claimed to have passed XML/schema validation. No GraphQL introspection, MCP tool invocation, credentials, form submission, or transaction occurs.
+`llms.txt` and `llms-full.txt` are bounded informational probes. A same-origin sitemap declared in the applicable robots policy is parsed within a five-document and 5,000-candidate budget; a sitemap index may supply additional candidate documents up to that limit. Sitemap candidates are sampled, never exhaustively fetched. XML parsing does not certify the site's full sitemap or schema. These observations do not award bonus points. No GraphQL introspection, MCP tool invocation, credentials, form submission, or transaction occurs.
 
 ## Fetch and storage bounds
 
-The scanner fetches the homepage and at most four eligible same-origin links from its initial HTML, in document order, with at most four child goroutines. It fetches robots before content on every new homepage redirect origin. Missing robots (404/410) permits fetching; unavailable, malformed, or denying policies leave content unobserved. Child redirects remain on the final homepage origin. Policies use matching user-agent groups, longest matching path rules, wildcard/end markers, and allow precedence on ties.
+The scanner fetches the homepage and up to 31 additional same-origin HTML pages selected from homepage links and a bounded sitemap candidate set. It distributes selection across path families where possible, then fills unused slots from one additional link hop. It does not recursively crawl child pages. Page fetches use up to eight per-scan workers; a shared per-instance outbound-request limiter and four scan workers add separate bounds. These are provisional code limits, not measured e2-micro capacity. Robots policy is checked before each content fetch, including redirects. Missing robots (404/410) permits fetching; unavailable, malformed, or denying policies leave content unobserved. Child redirects remain on the final homepage origin. Policies use matching user-agent groups, longest matching path rules, wildcard/end markers, and allow precedence on ties.
 
-Limits are 32 requests including redirects, 8 discovery requests including robots, 3 redirects per fetch, 5 seconds per request, 15 seconds overall, 2 MiB decoded response bodies, 12 MiB aggregate decoded bytes, 50,000 HTML tokens, and a nesting guard of 512. No target URL may exceed 2,048 bytes. Findings retain bounded 300-character text evidence rather than response bodies or HTML trees. With five pages and this registry, serialized report data remains comfortably below the store's 850 KiB ceiling; the store independently enforces that ceiling.
+Limits are 64 requests including redirects, 8 discovery requests including robots and sitemap documents, 3 redirects per fetch, 5 seconds per request, 60 seconds overall, 2 MiB decoded response bodies, 12 MiB aggregate decoded bytes reserved during concurrent reads, 50,000 HTML tokens, and a nesting guard of 512. No target URL may exceed 2,048 bytes. Findings retain bounded 300-character text evidence rather than response bodies or HTML trees. Before durable storage, finding URLs that point to listed report pages are represented by page indexes to avoid repeating long URLs in every finding; HTML and PDF resolve those references back to the same page URLs. The store independently enforces an 850,000-byte record ceiling.
 
 The transport resolves all destination addresses, rejects non-public/mixed public-private answers, and dials an exact validated address while HTTP/TLS retains the requested hostname. It uses no environment proxy. Reserved IPv4, IPv6, mapped addresses, metadata, link-local and transition-prefix cases are covered by focused tests. This is read-only source/test evidence, not a deployed penetration test.
 
 ## Verification
 
-`GOMAXPROCS=2 go test -p 1 ./internal/scanner` passes with synthetic transports and no real target scans. Tests cover depth/concurrency, robots before redirected content, unavailable policies, wildcard precedence, address rejection, domain normalization, response limits, request/discovery budgets, URL length, applicability, and score withholding. Integration, Nanos runtime qualification, and production load measurements are separate delivery evidence.
+Earlier scanner checks passed with synthetic transports and no real target scans. The current v3 scan-selection, aggregate-byte accounting, queue-wait, and storage-compaction changes require the exact-candidate CI run recorded in [verification](verification.md). Integration, Nanos runtime qualification, and production load measurements are separate delivery evidence.
 
 ## v2 sampled SEO additions
 
@@ -64,7 +64,7 @@ Existing title and description checks become partial for equal complete values a
 
 Canonical checks recognize tokenized rel values, flag absent, multiple or malformed absolute HTTP(S) references, and explain a different canonical destination without penalizing it solely for differing from the fetched URL. Targets are not fetched and intentional consolidation is not treated as a defect. HTTP Link-header canonicals are not evaluated.
 
-Zero-weight findings expose sampled-page outcomes, initial-HTML word counts, and HSTS header presence. Requested and final URLs distinguish completed redirects. Unknown fetch outcomes remain distinct from observed HTTP statuses. Word counts exclude head/script/style text but do not establish visible word counts or content quality. HSTS presence is a security observation, not validated transport-policy configuration or an SEO score input. No new requests, crawl depth, or performance measurements are introduced. HTML and PDF show these findings from the same saved evidence.
+Zero-weight findings expose sampled-page outcomes, initial-HTML word counts, and HSTS header presence. Requested and final URLs distinguish completed redirects. Unknown fetch outcomes remain distinct from observed HTTP statuses. Word counts exclude head/script/style text but do not establish visible word counts or content quality. HSTS presence is a security observation, not validated transport-policy configuration or an SEO score input. The later v3 release expands page selection and adds observed HTML response timing; that value is not browser load time or Core Web Vitals. HTML and PDF show these findings from the same saved evidence.
 
 New fixture tests in `observations_test.go` passed on 2026-10-28 after an explicitly authorized retry passed shared-Mac admission. The complete `go test -race -p 1 ./...` suite and `go vet -p 1 ./...` also passed. These are synthetic/local execution results, not Nanos, provider, or production qualification.
 

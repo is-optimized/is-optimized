@@ -27,7 +27,8 @@ type Finding struct {
 	Pillar        string              `json:"pillar"`
 	Title         string              `json:"title"`
 	Status        string              `json:"status"` // pass, partial, fail, unknown, not_applicable, information
-	URL           string              `json:"url"`
+	URL           string              `json:"url,omitempty"`
+	PageIndex     *int                `json:"page_index,omitempty"`
 	Evidence      string              `json:"evidence"`
 	Remediation   string              `json:"remediation"`
 	Weight        float64             `json:"weight"`

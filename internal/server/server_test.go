@@ -31,7 +31,7 @@ func (f *fakeScanner) Scan(context.Context, string) (reportmodel.Report, error) 
 	if domain == "" {
 		domain = "example.com"
 	}
-	return reportmodel.Report{Domain: domain, StartedAt: time.Now(), CompletedAt: time.Now(), MethodologyVersion: scanner.MethodologyVersion, Pages: []reportmodel.Page{{URL: "https://example.com", StatusCode: 200}}, Pillars: []reportmodel.Pillar{{ID: "seo", Name: "SEO", Score: &n, Coverage: 1}}, Findings: []reportmodel.Finding{{ID: "title", Pillar: "seo", Title: "Title", Status: "fail", Evidence: "<script>alert(1)</script>", Remediation: "Add a descriptive title"}}}, nil
+	return reportmodel.Report{Domain: domain, StartedAt: time.Now(), CompletedAt: time.Now(), MethodologyVersion: scanner.MethodologyVersion, Pages: []reportmodel.Page{{URL: "https://example.com", StatusCode: 200}}, Pillars: []reportmodel.Pillar{{ID: "seo", Name: "SEO", Score: &n, Coverage: 1}}, Findings: []reportmodel.Finding{{ID: "title", Pillar: "seo", Title: "Title", Status: "fail", URL: "https://example.com", Evidence: "<script>alert(1)</script>", Remediation: "Add a descriptive title"}}}, nil
 }
 
 type fakeSender struct {
@@ -93,7 +93,7 @@ func TestCompleteReportFlow(t *testing.T) {
 		t.Fatal(w.Code)
 	}
 	w = perform(s, "POST", "/api/v1/scans", `{"domain":"example.com"}`)
-	if w.Code != 200 || scan.calls != 1 {
+	if w.Code != 200 || scan.calls != 1 || !strings.Contains(w.Body.String(), `"url":"https://example.com"`) {
 		t.Fatal("cache did not reuse report")
 	}
 }
@@ -118,7 +118,7 @@ func signed(s *Server, path string, form url.Values) *httptest.ResponseRecorder 
 }
 func requestToken(t *testing.T, s *Server, key string) string {
 	t.Helper()
-	w := perform(s, "POST", "/api/v1/report-requests", `{"report_id":"`+key+`","marketing":false}`)
+	w := perform(s, "POST", "/api/v1/report-requests", `{"report_id":"`+key+`","phone":"+15555550123","marketing":false}`)
 	if w.Code != 201 {
 		t.Fatal(w.Code, w.Body.String())
 	}
@@ -255,60 +255,49 @@ func TestApprovedSMSHandoff(t *testing.T) {
 	s, _, sender := setup(t)
 	s.cfg.SMSWording = ApprovedRequestWording + "\nReport code: {token}"
 	key := completed(t, s)
-	for _, name := range []string{"", "David"} {
-		payload, _ := json.Marshal(map[string]any{"report_id": key, "name": name, "marketing": false})
-		w := perform(s, "POST", "/api/v1/report-requests", string(payload))
-		if w.Code != 201 {
-			t.Fatal(w.Code, w.Body.String())
-		}
-		var handoff map[string]string
-		if err := json.Unmarshal(w.Body.Bytes(), &handoff); err != nil {
-			t.Fatal(err)
-		}
-		expected := "Hi, please send me the free website audit report for example.com."
-		if name != "" {
-			expected += " My name is David."
-		}
-		token := tokenPattern.FindString(handoff["body"])
-		if token == "" || handoff["body"] != expected+"\nReport code: "+token {
-			t.Fatal("unexpected request wording", handoff["body"])
-		}
-		parsed, err := url.Parse(handoff["sms_url"])
-		if err != nil || parsed.Query().Get("body") != handoff["body"] {
-			t.Fatal("SMS URL does not preserve wording")
-		}
-		var req Request
-		if err = s.db.Get(context.Background(), "request_"+token, &req); err != nil || req.Marketing || req.State != "unconsumed" {
-			t.Fatal("composer opening recorded delivery/consent", err, req.State)
-		}
-		before := sender.calls
-		form := url.Values{"AccountSid": {"ACtest"}, "From": {"+15555550123"}, "To": {s.cfg.TwilioFrom}, "MessageSid": {"SMapproved" + name}, "Body": {handoff["body"]}}
-		if w = signed(s, "/webhooks/twilio/inbound", form); w.Code != 200 {
-			t.Fatal(w.Code)
-		}
-		s.dispatchMessages(context.Background())
-		expectedReply := "Sire Run, Inc.: Here’s your free website audit report: https://audit.example/reports/" + key + "/pdf. Reply STOP to opt out."
-		if sender.calls != before+1 || sender.body != expectedReply {
-			t.Fatal("reply mismatch", sender.calls, sender.body)
-		}
+	payload, _ := json.Marshal(map[string]any{"report_id": key, "phone": "+15555550123", "marketing": false})
+	w := perform(s, "POST", "/api/v1/report-requests", string(payload))
+	if w.Code != 201 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	var handoff map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &handoff); err != nil {
+		t.Fatal(err)
+	}
+	expected := "Hi, please send me the free website audit report for example.com."
+	token := tokenPattern.FindString(handoff["body"])
+	if token == "" || handoff["body"] != expected+"\nReport code: "+token {
+		t.Fatal("unexpected request wording", handoff["body"])
+	}
+	parsed, err := url.Parse(handoff["sms_url"])
+	if err != nil || parsed.Query().Get("body") != handoff["body"] {
+		t.Fatal("SMS URL does not preserve wording")
+	}
+	var req Request
+	if err = s.db.Get(context.Background(), "request_"+token, &req); err != nil || req.Marketing || req.State != "unconsumed" {
+		t.Fatal("composer opening recorded delivery/consent", err, req.State)
+	}
+	before := sender.calls
+	form := url.Values{"AccountSid": {"ACtest"}, "From": {"+15555550123"}, "To": {s.cfg.TwilioFrom}, "MessageSid": {"SMapproved"}, "Body": {handoff["body"]}}
+	if w = signed(s, "/webhooks/twilio/inbound", form); w.Code != 200 {
+		t.Fatal(w.Code)
+	}
+	s.dispatchMessages(context.Background())
+	expectedReply := "Sire Run, Inc.: Here’s your free website audit report: https://audit.example/reports/" + key + "/pdf. Reply STOP to opt out."
+	if sender.calls != before+1 || sender.body != expectedReply {
+		t.Fatal("reply mismatch", sender.calls, sender.body)
 	}
 }
 
-func TestSMSNameAndDisabledBoundary(t *testing.T) {
+func TestSMSDisabledBoundary(t *testing.T) {
 	s, _, _ := setup(t)
 	key := completed(t, s)
-	for _, name := range []string{"{token}", "Alice\nSTOP", strings.Repeat("a", 81), strings.Repeat("a", 36)} {
-		data, _ := json.Marshal(map[string]any{"report_id": key, "name": name})
-		if w := perform(s, "POST", "/api/v1/report-requests", string(data)); w.Code != 400 {
-			t.Fatal("unsafe name accepted", w.Code)
-		}
-	}
 	s.cfg.SMS = false
 	if w := perform(s, "POST", "/api/v1/report-requests", `{"report_id":"`+key+`"}`); w.Code != 503 {
 		t.Fatal(w.Code)
 	}
 	w := perform(s, "GET", "/", "")
-	if w.Code != 200 || strings.Contains(w.Body.String(), `id="consent"`) || !strings.Contains(w.Body.String(), `aria-describedby="sms-note"`) {
+	if w.Code != 200 || strings.Contains(w.Body.String(), `id="consent"`) || !strings.Contains(w.Body.String(), `id="sms-note"`) || !strings.Contains(w.Body.String(), `class="view-report-link"`) {
 		t.Fatal("disabled SMS view", w.Code)
 	}
 	if w = perform(s, "GET", "/reports/"+key, ""); w.Code != 200 {
@@ -325,12 +314,24 @@ func TestSMSNameAndDisabledBoundary(t *testing.T) {
 	}
 }
 
+func TestPhoneFirstHTMLHandoff(t *testing.T) {
+	s, _, _ := setup(t)
+	w := perform(s, "GET", "/", "")
+	body := w.Body.String()
+	if w.Code != 200 || !strings.Contains(body, `id="phone"`) || !strings.Contains(body, `id="text" class="sms-primary"`) || !strings.Contains(body, `id="view" class="view-report-link"`) {
+		t.Fatalf("phone-first report delivery page missing: status %d", w.Code)
+	}
+	if strings.Contains(body, `id="name"`) || strings.Contains(body, `byID('name')`) {
+		t.Fatal("phone-only SMS request still exposes a name field")
+	}
+}
+
 func TestSMSHexadecimalDomainCorrelation(t *testing.T) {
 	s, scan, sender := setup(t)
 	scan.domain = strings.Repeat("a", 36) + ".com"
 	s.cfg.SMSWording = ApprovedRequestWording + "\nReport code: {token}"
 	key := completed(t, s)
-	w := perform(s, "POST", "/api/v1/report-requests", `{"report_id":"`+key+`"}`)
+	w := perform(s, "POST", "/api/v1/report-requests", `{"report_id":"`+key+`","phone":"+15555550123"}`)
 	if w.Code != 201 {
 		t.Fatal(w.Code, w.Body.String())
 	}
@@ -366,6 +367,10 @@ func TestSMSHexadecimalDomainCorrelation(t *testing.T) {
 func TestSMSIntendedNumberBinding(t *testing.T) {
 	s, _, sender := setup(t)
 	key := completed(t, s)
+	missing := perform(s, "POST", "/api/v1/report-requests", `{"report_id":"`+key+`"}`)
+	if missing.Code != 400 {
+		t.Fatalf("missing mobile number accepted: %d", missing.Code)
+	}
 	bad := perform(s, "POST", "/api/v1/report-requests", `{"report_id":"`+key+`","phone":"not-a-phone"}`)
 	if bad.Code != 400 {
 		t.Fatal(bad.Code)

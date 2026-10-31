@@ -240,13 +240,22 @@ func PDF(r reportmodel.Report) ([]byte, error) {
 		p.MultiCell(54, 3.8, fmt.Sprintf("%d passed · %d partial · %d failed · %d unknown\n%d not applicable · %d informational · %d unclassified", v.Counts.Pass, v.Counts.Partial, v.Counts.Fail, v.Counts.Unknown, v.Counts.NotApplicable, v.Counts.Information, v.Counts.Other), "", "L", false)
 	}
 	p.SetXY(18, scoreTop+64)
+	if view.Fetch != nil {
+		p.SetTextColor(22, 26, 23)
+		p.SetFont("Go", "B", 11)
+		line("Observed HTML fetch time")
+		p.SetFont("Go", "", 9)
+		line(fmt.Sprintf("Homepage: %s · sample median: %s · range: %s–%s across %d successful pages.", view.Fetch.Homepage, view.Fetch.Median, view.Fetch.Minimum, view.Fetch.Maximum, view.Fetch.Count))
+		p.SetTextColor(80, 89, 81)
+		line("Measured from the scanner request through receipt of the complete initial HTML response, including network and body transfer. Not browser load time or Core Web Vitals.")
+	}
 	p.SetTextColor(22, 26, 23)
 	p.SetFont("Go", "", 10)
 	line("Bars show unweighted check counts, not score contributions. No composite score or external ranking is calculated.")
 	line("Scores describe observed technical signals, not rankings, AI citations, revenue, or successful AI tasks. Coverage is the share of applicable evidence we could check. Insufficient evidence is not a zero.")
 	line("Find: discover useful pages. Read: extract their information. Act: discover a declared interface; a link alone does not prove it works.")
 	line(taskEvaluationLabel(r.BehavioralEvaluation) + ". Static checks do not authenticate or complete tasks.")
-	line("A focused snapshot: homepage plus up to four direct links, without deeper crawling or JavaScript execution. HTML and PDF use the same saved evidence.")
+	line("A bounded snapshot: homepage plus up to 31 same-site pages selected from links and declared sitemap sources, at most two link hops, without JavaScript execution. HTML and PDF use the same saved evidence.")
 	drawFinding := func(f reportmodel.Finding) {
 		if p.GetY() > 231 {
 			p.AddPage()

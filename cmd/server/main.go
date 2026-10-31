@@ -30,6 +30,7 @@ func env(k, d string) string {
 	return d
 }
 func run() error {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 	startupStage("metadata", "starting")
@@ -52,7 +53,7 @@ func run() error {
 	}
 	defer db.Close()
 	startupStage("storage", "complete")
-	cfg := server.Config{TrustedProxyCIDRs: os.Getenv("TRUSTED_PROXY_CIDRS"), PublicURL: env("PUBLIC_URL", "http://localhost:8080"), TwilioAccount: os.Getenv("TWILIO_ACCOUNT_SID"), TwilioToken: os.Getenv("TWILIO_AUTH_TOKEN"), TwilioFrom: os.Getenv("TWILIO_FROM"), Disclosure: os.Getenv("CONSENT_DISCLOSURE"), DisclosureVersion: os.Getenv("CONSENT_VERSION"), SMSWording: os.Getenv("SMS_REQUEST_WORDING"), SMS: os.Getenv("SMS_ENABLED") == "true"}
+	cfg := server.Config{TrustedProxyCIDRs: os.Getenv("TRUSTED_PROXY_CIDRS"), PublicURL: env("PUBLIC_URL", "http://localhost:8080"), TwilioAccount: os.Getenv("TWILIO_ACCOUNT_SID"), TwilioToken: os.Getenv("TWILIO_AUTH_TOKEN"), TwilioFrom: os.Getenv("TWILIO_FROM"), Disclosure: env("CONSENT_DISCLOSURE", server.ApprovedDisclosure), DisclosureVersion: env("CONSENT_VERSION", server.ApprovedDisclosureVersion), SMSWording: server.ApprovedRequestWording, SMS: os.Getenv("SMS_ENABLED") == "true"}
 	sender := &messaging.Twilio{Account: cfg.TwilioAccount, Token: cfg.TwilioToken, From: cfg.TwilioFrom}
 	app, e := server.New(db, scanner.New(), sender, cfg)
 	if e != nil {
