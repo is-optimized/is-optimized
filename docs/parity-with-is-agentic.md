@@ -72,7 +72,7 @@ deliberate: an existing related heuristic is not treated as equivalent coverage.
 | About/contact/privacy/terms trust pages | `geo.trust.about`, `geo.trust.contact`, `geo.trust.privacy`, `geo.trust.terms` | `agent.find.docs` (partial) | Implemented partially: probes four same-origin pages and checks 500 visible-text bytes; one standard route per topic, no legal/claim assessment. |
 | Organization identity completeness and sameAs | `geo.organization`, `geo.entity_links`, `geo.schema_breadth` | `geo.entity` (partial) | Implemented partially: checks supported entity fields, sameAs count, and capped type-breadth bonus; does not prove entity ownership or claim accuracy. |
 | Main-text token estimate and visible-text/HTML ratio | `agent.content_budget`, `geo.content_ratio` | `agent.read.facts` (partial) | Implemented: tokenizer-independent text estimate and visible-text/HTML byte ratio with explicit thresholds; candidate live-site evidence remains. |
-| OpenAPI discovery and operation/schema quality | `agent.openapi.*` | `agent.act.openapi` (discovery only) | Pending; only read-only GET of advertised or standard paths; parser and bounds required. |
+| OpenAPI discovery and operation/schema quality | `agent.openapi.spec`, `agent.openapi.operations`, `agent.openapi.errors`, `agent.openapi.scopes`, `agent.openapi.versioning` | `agent.act.openapi` (discovery only) | Implemented partially: follows a bounded set of public JSON/YAML contracts when API/developer links are present; scores OpenAPI 3, operation identifiers/descriptions, response schemas, OAuth scopes, and `info.version`. Operation execution, pagination, idempotency, async/batch patterns and schema complexity remain. |
 | Live unauthenticated API behavior, REST/GraphQL, rate limits and error shape | `agent.api.*` | `agent.act.openapi` (discovery only) | Pending; only safe unauthenticated GET; never invoke mutations. |
 | OAuth/OIDC/protected-resource discovery and PKCE | `agent.oauth.*` | `agent.act.auth` (discovery only) | Pending; validate public metadata only, no registration or token exchange. |
 | MCP discovery, read-only initialization/list methods, schemas, annotations and errors | `agent.mcp.*` | `agent.act.interfaces` (discovery only) | Pending; strictly restrict calls to the read-only methods specified by the prompt. |
@@ -98,9 +98,9 @@ does not imply that the check already exists.
 | `agent-friendly-404` | Essential | prosody.chat, github.com, gymshark.com, is-optimized.com | `agent.markdown_404` | Implemented site-level response probe; pending candidate live-site verification. |
 | `agent-instruction` | Recommended | prosody.chat, gymshark.com, parallel.ai, is-optimized.com | `agent.instructions.when_to_use`, `agent.instructions.quality` | Implemented bounded guidance quality and explicit use-presence checks; candidate live-site evidence remains. |
 | `agentic-search-specific` | Recommended | prosody.chat, gymshark.com, parallel.ai | `agent.discoverability.docs` | Search-provider/key dependent; not observed without a configured source. |
-| `api-error-model` | Recommended | github.com | `agent.openapi.error_schema` | Planned contract parsing. |
-| `api-schema-analysis` | Recommended | github.com, gymshark.com | `agent.openapi.complexity` | Planned bounded schema analysis. |
-| `api-versioning-policy` | Recommended | github.com | `agent.openapi.versioning` | Planned explicit version/deprecation evidence. |
+| `api-error-model` | Recommended | github.com | `agent.openapi.errors` | Implemented response-schema presence for typed 2xx and error/default responses; no schema quality semantics. |
+| `api-schema-analysis` | Recommended | github.com, gymshark.com | `agent.openapi.operations`, `agent.openapi.errors` | Implemented operation identifiers, summaries/descriptions, and typed response presence; schema complexity remains. |
+| `api-versioning-policy` | Recommended | github.com | `agent.openapi.versioning` | Implemented `info.version` presence; compatibility and deprecation policy remain unverified. |
 | `brand-search-accuracy` | Recommended | prosody.chat, is-agentic.com, vercel.com, galileo.ai, is-optimized.com | `agent.discoverability.brand` | Search-provider/key dependent; never infer from page HTML. |
 | `cli-tool` | Recommended | galileo.ai, gymshark.com | `agent.developer.cli` | Planned first-party package discovery. |
 | `content-no-js` | Essential | vercel.com, github.com, galileo.ai, gymshark.com, parallel.ai | `agent.access` | Existing initial-HTML heuristic is partial; no browser execution. |
@@ -114,14 +114,14 @@ does not imply that the check already exists.
 | `metadata-completeness` | Recommended | prosody.chat, gymshark.com, is-optimized.com | `seo.social_metadata` | Implemented for sampled homepage metadata; candidate scan evidence remains to be collected. |
 | `oauth-support` | Essential | parallel.ai | `agent.act.auth` | Existing authentication-link discovery is partial; metadata-only validation remains pending. |
 | `onboarding-friction` | Recommended | vercel.com, gymshark.com | `agent.api.onboarding` | Planned public health/error/onboarding observations. |
-| `openapi-spec` | Essential | github.com, gymshark.com | `agent.openapi.discovery` | Existing link discovery is partial; document parsing planned. |
+| `openapi-spec` | Essential | github.com, gymshark.com | `agent.openapi.spec` | Implemented bounded JSON/YAML OpenAPI 3 discovery and parsing when an API/developer surface is linked; candidate live-site evidence remains. |
 | `org-schema-completeness` | Recommended | prosody.chat, github.com, galileo.ai, gymshark.com, parallel.ai, is-optimized.com | `geo.organization`, `geo.entity_links`, `geo.schema_breadth` | Implemented field, sameAs-count and type-breadth checks; truth and entity ownership are not validated. |
 | `pricing-info` | Recommended | gymshark.com | `agent.read.pricing` | Existing linked-pricing observation is partial; no pricing policy inferred. |
 | `public-api` | Recommended | galileo.ai, gymshark.com | `agent.api.reachability` | Planned read-only advertised GET probe. |
 | `public-api-docs` | Recommended | gymshark.com | `agent.developer.api_links` | Existing docs/resource links are partial. |
 | `rate-limit-headers` | Recommended | vercel.com, github.com, galileo.ai, parallel.ai | `agent.api.rate_limits` | Planned; probe safe unauthenticated GET responses only. |
 | `redirect-hygiene` | Essential | gymshark.com | `seo.redirect_hygiene` | Existing requested/final URL evidence is partial; chain/markup checks planned. |
-| `scoped-permissions` | Essential | vercel.com, gymshark.com | `agent.openapi.scopes` | Planned scope parsing; no authorization or token exchange. |
+| `scoped-permissions` | Essential | vercel.com, gymshark.com | `agent.openapi.scopes` | Implemented named OAuth scope detection in declared security schemes; no authorization or token exchange. |
 | `sitemap` | Recommended | prosody.chat, is-optimized.com | `seo.sitemap_quality`, `seo.sitemap_freshness` | Implemented bounded validity, same-origin and freshness checks; candidate live-site evidence remains. |
 | `trust-anchors` | Recommended | prosody.chat, galileo.ai, gymshark.com, is-optimized.com | `geo.trust.about`, `geo.trust.contact`, `geo.trust.privacy`, `geo.trust.terms` | Implemented bounded probes for about/contact/privacy/terms; candidate live-site evidence remains. |
 

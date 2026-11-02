@@ -273,6 +273,8 @@ func annotateReadiness(findings []reportmodel.Finding) {
 			f.Standards = references("partial", "AR-FIND-03")
 		case "agent.discovery/llms.txt":
 			f.Standards = references("partial", "AR-READ-07")
+		case "agent.form_labels":
+			f.Standards = []reportmodel.StandardReference{{ID: "WCAG 2.2 SC 3.3.2", URL: "https://www.w3.org/WAI/WCAG22/Understanding/labels-or-instructions.html", Coverage: "partial"}}
 		}
 	}
 }
