@@ -20,7 +20,7 @@ import (
 	"github.com/is-optimized/is-optimized/internal/reportmodel"
 )
 
-const MethodologyVersion = "2026-11-agentready-v2"
+const MethodologyVersion = "2026-11-agentready-v3"
 const maxBody = 2 << 20
 const maxContentPages = 32
 const maxRequestCount = 64
@@ -279,6 +279,10 @@ func (ss *session) probeHeaders(raw, site string, headers http.Header) (response
 		return response{}, errors.New("discovery budget exhausted")
 	}
 	return ss.fetchWithHeaders(raw, false, site, headers)
+}
+
+func (ss *session) probeExternal(raw string) (response, error) {
+	return ss.probeHeaders(raw, "", make(http.Header))
 }
 func (s *Scanner) Scan(ctx context.Context, domain string) (reportmodel.Report, error) {
 	domain, err := NormalizeDomain(domain)

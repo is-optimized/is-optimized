@@ -3,6 +3,7 @@ package scanner
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"mime"
 	"net/http"
@@ -24,9 +25,13 @@ func siteAgentChecks(ss *session, home *url.URL, homepage response, homepagePage
 			trustFinding("geo.trust.contact", "Contact page", "/contact", "unknown", "Homepage response unavailable; trust-page discovery was not probed."),
 			trustFinding("geo.trust.privacy", "Privacy page", "/privacy", "unknown", "Homepage response unavailable; trust-page discovery was not probed."),
 			trustFinding("geo.trust.terms", "Terms page", "/terms", "unknown", "Homepage response unavailable; trust-page discovery was not probed."),
+			{ID: "seo.social_metadata", Pillar: "seo", Title: "Social metadata completeness", Status: "unknown", Weight: 2, Tier: "recommended", URL: origin(home) + "/", Evidence: "Homepage response unavailable; social metadata was not evaluated."},
+			{ID: "geo.organization", Pillar: "geo", Title: "Organization schema completeness", Status: "unknown", Weight: 2, Tier: "recommended", URL: origin(home) + "/", Evidence: "Homepage response unavailable; structured identity was not evaluated."},
+			{ID: "geo.entity_links", Pillar: "geo", Title: "Structured entity links", Status: "unknown", Weight: 1, Tier: "recommended", URL: origin(home) + "/", Evidence: "Homepage response unavailable; sameAs links were not evaluated."},
+			{ID: "geo.schema_breadth", Pillar: "geo", Title: "Structured data type breadth", Status: "not_applicable", Weight: 1, Tier: "bonus", URL: origin(home) + "/", Evidence: "Homepage response unavailable; structured-data types were not evaluated."},
 		}
 	}
-	results := make(chan reportmodel.Finding, 7)
+	results := make(chan reportmodel.Finding, 11)
 	go func() { results <- markdownNegotiationCheck(ss, home, homepage) }()
 	go func() { results <- markdownNotFoundCheck(ss, home) }()
 	go func() { results <- aiCrawlerAccessCheck(ss, home, homepage) }()
@@ -34,12 +39,322 @@ func siteAgentChecks(ss *session, home *url.URL, homepage response, homepagePage
 		trust := trust
 		go func() { results <- trustPageCheck(ss, home, homepagePage, trust) }()
 	}
-	out := make([]reportmodel.Finding, 0, 7)
+	go func() { results <- socialMetadataCheck(ss, home, homepagePage) }()
+	for _, schemaFinding := range schemaChecks(home, homepagePage) {
+		schemaFinding := schemaFinding
+		go func() { results <- schemaFinding }()
+	}
+	out := make([]reportmodel.Finding, 0, 11)
 	for i := 0; i < cap(results); i++ {
 		out = append(out, <-results)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
+}
+
+func schemaChecks(home *url.URL, homepage pageResult) []reportmodel.Finding {
+	baseURL := origin(home) + "/"
+	org := reportmodel.Finding{ID: "geo.organization", Pillar: "geo", Title: "Organization schema completeness", Status: "unknown", Weight: 2, Tier: "recommended", Stage: "read", URL: baseURL, Applicability: "Checks declared public Schema.org entity fields without validating their truth or business legitimacy.", Remediation: "Add accurate name, url, logo, description, two authority sameAs links, and for Organization entities, contactPoint and PostalAddress fields."}
+	links := reportmodel.Finding{ID: "geo.entity_links", Pillar: "geo", Title: "Structured entity links", Status: "unknown", Weight: 1, Tier: "recommended", Stage: "find", URL: baseURL, Applicability: "Relevant to JSON-LD organization, local business, software, or person entities.", Remediation: "Add at least two accurate sameAs links to authoritative profiles for the declared entity."}
+	breadth := reportmodel.Finding{ID: "geo.schema_breadth", Pillar: "geo", Title: "Structured data type breadth", Status: "not_applicable", Weight: 1, Tier: "bonus", Stage: "read", URL: baseURL, Applicability: "Bonus only when parseable JSON-LD entity types are present.", Remediation: "Add other accurate and applicable Schema.org types, such as WebSite or BreadcrumbList, where they help describe the site."}
+	if homepage.doc == nil {
+		org.Evidence, links.Evidence, breadth.Evidence = "Homepage HTML unavailable; schema was not observed.", "Homepage HTML unavailable; schema was not observed.", "Homepage HTML unavailable; schema was not observed."
+		return []reportmodel.Finding{org, links, breadth}
+	}
+	var entityMaps []map[string]any
+	types := map[string]bool{}
+	walk(homepage.doc, func(n *html.Node) {
+		if n.Type != html.ElementNode || n.Data != "script" || !strings.EqualFold(strings.TrimSpace(attr(n, "type")), "application/ld+json") {
+			return
+		}
+		var value any
+		if json.Unmarshal([]byte(text(n)), &value) == nil {
+			walkJSONLD(value, &entityMaps, types)
+		}
+	})
+	var recognized []map[string]any
+	for _, entity := range entityMaps {
+		for kind := range schemaTypes(entity) {
+			switch kind {
+			case "organization", "localbusiness", "softwareapplication", "person":
+				recognized = append(recognized, entity)
+			}
+		}
+	}
+	if len(entityMaps) == 0 {
+		org.Status, links.Status = "fail", "fail"
+		org.Evidence, links.Evidence = "No parseable JSON-LD entity nodes were observed.", "No JSON-LD sameAs links were observed."
+		breadth.Evidence = "No JSON-LD types observed; bonus is not applicable."
+		return []reportmodel.Finding{org, links, breadth}
+	}
+	if len(recognized) == 0 {
+		org.Status, links.Status = "fail", "fail"
+		org.Evidence = "JSON-LD was present but no Organization, LocalBusiness, SoftwareApplication, or Person entity was observed."
+		links.Evidence = "No recognized entity's sameAs links were observed."
+	} else {
+		complete, required := 0, 0
+		maxSameAs := 0
+		for _, entity := range recognized {
+			kinds := schemaTypes(entity)
+			orgEntity := kinds["organization"] || kinds["localbusiness"]
+			checks := []bool{schemaValuePresent(entity["name"]), absolutePublicURL(schemaString(entity["url"])), schemaValuePresent(entity["logo"]), schemaValuePresent(entity["description"])}
+			count := schemaSameAsCount(entity["sameAs"])
+			if count > maxSameAs {
+				maxSameAs = count
+			}
+			checks = append(checks, count >= 2)
+			if orgEntity {
+				checks = append(checks, schemaContactPoint(entity["contactPoint"]), schemaPostalAddress(entity["address"]))
+			}
+			for _, present := range checks {
+				required++
+				if present {
+					complete++
+				}
+			}
+		}
+		org.Evidence = fmt.Sprintf("Observed %d of %d required fields across %d recognized entity node(s); fields: name, absolute url, logo, description, at least two sameAs links, and for Organization/LocalBusiness contactPoint plus PostalAddress", complete, required, len(recognized))
+		switch {
+		case complete == required:
+			org.Status = "pass"
+		case complete > 0:
+			org.Status = "partial"
+		default:
+			org.Status = "fail"
+		}
+		links.Evidence = fmt.Sprintf("Maximum of %d sameAs link(s) observed on a recognized entity; two are recommended", maxSameAs)
+		switch {
+		case maxSameAs >= 2:
+			links.Status = "pass"
+		case maxSameAs == 1:
+			links.Status = "partial"
+		default:
+			links.Status = "fail"
+		}
+	}
+	if len(types) >= 3 {
+		breadth.Status = "pass"
+	} else if len(types) > 0 {
+		breadth.Status = "partial"
+	}
+	breadth.Evidence = fmt.Sprintf("Observed %d distinct JSON-LD @type value(s); three or more earns a capped bonus signal", len(types))
+	return []reportmodel.Finding{org, links, breadth}
+}
+
+func walkJSONLD(value any, entities *[]map[string]any, types map[string]bool) {
+	visited := 0
+	walkJSONLDNode(value, entities, types, &visited, 0)
+}
+
+func walkJSONLDNode(value any, entities *[]map[string]any, types map[string]bool, visited *int, depth int) {
+	if *visited >= 2048 || depth > 64 {
+		return
+	}
+	*visited++
+	switch v := value.(type) {
+	case map[string]any:
+		if _, exists := v["@type"]; exists && len(*entities) < 128 {
+			*entities = append(*entities, v)
+			for kind := range schemaTypes(v) {
+				types[kind] = true
+			}
+		}
+		for _, child := range v {
+			walkJSONLDNode(child, entities, types, visited, depth+1)
+		}
+	case []any:
+		for _, child := range v {
+			walkJSONLDNode(child, entities, types, visited, depth+1)
+		}
+	}
+}
+
+func schemaTypes(entity map[string]any) map[string]bool {
+	out := map[string]bool{}
+	add := func(raw string) {
+		parts := strings.Split(strings.TrimSpace(raw), "/")
+		if len(parts) > 0 && parts[len(parts)-1] != "" {
+			out[strings.ToLower(parts[len(parts)-1])] = true
+		}
+	}
+	switch value := entity["@type"].(type) {
+	case string:
+		add(value)
+	case []any:
+		for _, item := range value {
+			if str, ok := item.(string); ok {
+				add(str)
+			}
+		}
+	}
+	return out
+}
+
+func schemaString(value any) string {
+	if str, ok := value.(string); ok {
+		return str
+	}
+	if object, ok := value.(map[string]any); ok {
+		if id, ok := object["@id"].(string); ok {
+			return id
+		}
+	}
+	return ""
+}
+
+func schemaValuePresent(value any) bool {
+	switch v := value.(type) {
+	case string:
+		return strings.TrimSpace(v) != ""
+	case map[string]any:
+		return len(v) > 0
+	case []any:
+		return len(v) > 0
+	default:
+		return false
+	}
+}
+
+func schemaSameAsCount(value any) int {
+	switch v := value.(type) {
+	case string:
+		if absolutePublicURL(v) {
+			return 1
+		}
+	case []any:
+		count := 0
+		for _, item := range v {
+			if str, ok := item.(string); ok && absolutePublicURL(str) {
+				count++
+			}
+		}
+		return count
+	}
+	return 0
+}
+
+func schemaContactPoint(value any) bool {
+	items := []any{value}
+	if list, ok := value.([]any); ok {
+		items = list
+	}
+	for _, item := range items {
+		if object, ok := item.(map[string]any); ok && schemaValuePresent(object["contactType"]) && (schemaValuePresent(object["email"]) || schemaValuePresent(object["telephone"])) {
+			return true
+		}
+	}
+	return false
+}
+
+func schemaPostalAddress(value any) bool {
+	items := []any{value}
+	if list, ok := value.([]any); ok {
+		items = list
+	}
+	for _, item := range items {
+		if object, ok := item.(map[string]any); ok {
+			kinds := schemaTypes(object)
+			if kinds["postaladdress"] && (schemaValuePresent(object["addressCountry"]) || schemaValuePresent(object["addressLocality"])) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func socialMetadataCheck(ss *session, home *url.URL, homepage pageResult) reportmodel.Finding {
+	f := reportmodel.Finding{
+		ID: "seo.social_metadata", Pillar: "seo", Title: "Social metadata completeness", Status: "unknown",
+		Weight: 2, Tier: "recommended", Stage: "read", URL: origin(home) + "/",
+		Applicability: "Assesses homepage metadata signals used for page identity and link previews.",
+		Remediation:   "Add html lang, Open Graph title/description/image/type/url, a Twitter card, and one valid canonical link.",
+	}
+	if homepage.doc == nil {
+		f.Evidence = "Homepage HTML unavailable; metadata was not observed."
+		return f
+	}
+	var lang, ogTitle, ogDescription, ogImage, ogType, ogURL, twitterCard, canonical string
+	walk(homepage.doc, func(n *html.Node) {
+		if n.Type != html.ElementNode {
+			return
+		}
+		if n.Data == "html" {
+			lang = strings.TrimSpace(attr(n, "lang"))
+		}
+		if n.Data == "meta" {
+			switch strings.ToLower(attr(n, "property")) {
+			case "og:title":
+				ogTitle = attr(n, "content")
+			case "og:description":
+				ogDescription = attr(n, "content")
+			case "og:image":
+				ogImage = strings.TrimSpace(attr(n, "content"))
+			case "og:type":
+				ogType = attr(n, "content")
+			case "og:url":
+				ogURL = strings.TrimSpace(attr(n, "content"))
+			}
+			if strings.EqualFold(attr(n, "name"), "twitter:card") {
+				twitterCard = attr(n, "content")
+			}
+		}
+		if n.Data == "link" && hasToken(attr(n, "rel"), "canonical") {
+			canonical = strings.TrimSpace(attr(n, "href"))
+		}
+	})
+	checks := 0
+	observed := 0
+	for _, ok := range []bool{
+		lang != "", strings.TrimSpace(ogTitle) != "", strings.TrimSpace(ogDescription) != "",
+		false, strings.TrimSpace(ogType) != "", absolutePublicURL(ogURL), strings.TrimSpace(twitterCard) != "", absolutePublicURL(canonical),
+	} {
+		checks++
+		if ok {
+			observed++
+		}
+	}
+	imageState := "missing"
+	if ogImage != "" {
+		imageURL, err := url.Parse(ogImage)
+		if err == nil && imageURL.IsAbs() && validateURL(imageURL) == nil {
+			var image response
+			if origin(imageURL) == origin(home) {
+				image, err = ss.probe(imageURL.String(), origin(home))
+			} else {
+				image, err = ss.probeExternal(imageURL.String())
+			}
+			mediaType, _, _ := mime.ParseMediaType(image.contentType)
+			if err == nil && image.code == http.StatusOK && strings.HasPrefix(strings.ToLower(mediaType), "image/") {
+				imageState = "resolved to an HTTP 200 image/* response"
+				observed++
+			} else if err != nil {
+				imageState = "resolution was not observed"
+			} else {
+				imageState = fmt.Sprintf("resolved to HTTP %d with Content-Type %s", image.code, mediaType)
+			}
+		} else {
+			imageState = "present but not an absolute public URL"
+		}
+	} else {
+		imageState = "missing"
+	}
+	f.Evidence = fmt.Sprintf("Observed %d of %d signals (html lang=%t, og:title=%t, og:description=%t, og:image=%s, og:type=%t, og:url=%t, twitter:card=%t, canonical=%t)",
+		observed, checks, lang != "", strings.TrimSpace(ogTitle) != "", strings.TrimSpace(ogDescription) != "", imageState,
+		strings.TrimSpace(ogType) != "", absolutePublicURL(ogURL), strings.TrimSpace(twitterCard) != "", absolutePublicURL(canonical))
+	switch {
+	case observed == checks:
+		f.Status = "pass"
+	case observed > 0:
+		f.Status = "partial"
+	default:
+		f.Status = "fail"
+	}
+	return f
+}
+
+func absolutePublicURL(raw string) bool {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	return err == nil && u.IsAbs() && validateURL(u) == nil
 }
 
 type trustPageDefinition struct {

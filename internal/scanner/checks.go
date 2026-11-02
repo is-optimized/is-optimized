@@ -17,12 +17,13 @@ import (
 type pageResult struct {
 	page         reportmodel.Page
 	doc          *html.Node
+	htmlBytes    int
 	headerRobots string
 	hsts         string
 }
 
 func analyze(r response, err error, requested string, duration time.Duration) pageResult {
-	p := pageResult{page: reportmodel.Page{URL: requested, RequestedURL: requested, StatusCode: r.code, DurationMS: duration.Milliseconds()}}
+	p := pageResult{page: reportmodel.Page{URL: requested, RequestedURL: requested, StatusCode: r.code, DurationMS: duration.Milliseconds()}, htmlBytes: len(r.body)}
 	if r.url != nil {
 		p.page.URL = r.url.String()
 	}
@@ -232,8 +233,8 @@ type Check struct {
 	Tier                           string
 }
 
-// Registry is the complete MVP weighted check set. Applicability and evaluation
-// are encoded below; changes require a new MethodologyVersion.
+// Registry is the per-page weighted check set. Site-level weighted checks live
+// in site_checks.go. Changes require a new MethodologyVersion.
 func Registry() []Check {
 	return []Check{
 		{ID: "seo.access", Pillar: "seo", Title: "Public HTML response", Remediation: "Ensure intended public pages return useful HTML with a successful HTTP status.", Weight: 3, Foundational: true, Tier: "essential"},
@@ -264,7 +265,7 @@ func evaluate(p pageResult) []reportmodel.Finding {
 	canonicalValues := map[string]bool{}
 	images, missingAlt, controls, unnamed, links, emptyLinks := 0, 0, 0, 0, 0, 0
 	heading, structured, main, nav, article, author, dated, entity := false, false, false, false, false, false, false, false
-	var visible strings.Builder
+	var visible, mainVisible strings.Builder
 	labels := map[string]string{}
 	ids := map[string]string{}
 	walk(p.doc, func(n *html.Node) {
@@ -306,15 +307,27 @@ func evaluate(p pageResult) []reportmodel.Finding {
 	walk(p.doc, func(n *html.Node) {
 		if n.Type == html.TextNode {
 			skip := false
+			inMain := false
 			for a := n.Parent; a != nil; a = a.Parent {
-				if a.Data == "script" || a.Data == "style" || a.Data == "head" {
+				if a.Data == "script" || a.Data == "style" || a.Data == "head" || a.Data == "template" || strings.EqualFold(attr(a, "aria-hidden"), "true") || strings.Contains(strings.ToLower(attr(a, "style")), "display:none") {
 					skip = true
-					break
+				}
+				for _, aAttr := range a.Attr {
+					if aAttr.Key == "hidden" {
+						skip = true
+					}
+				}
+				if a.Data == "main" {
+					inMain = true
 				}
 			}
 			if !skip {
 				visible.WriteString(n.Data)
 				visible.WriteByte(' ')
+				if inMain {
+					mainVisible.WriteString(n.Data)
+					mainVisible.WriteByte(' ')
+				}
 			}
 		}
 		if n.Type != html.ElementNode {
@@ -520,6 +533,37 @@ func evaluate(p pageResult) []reportmodel.Finding {
 		out = append(out, f)
 	}
 	out = append(out, reportmodel.Finding{ID: "seo.words", Pillar: "seo", Title: "Initial HTML word count", Status: observationStatus(p), URL: p.page.URL, Evidence: wordEvidence(p, visible.String())})
+	visibleText := strings.TrimSpace(visible.String())
+	tokenText := strings.TrimSpace(mainVisible.String())
+	tokenSource := "main element"
+	if tokenText == "" {
+		tokenText = visibleText
+		tokenSource = "initial HTML fallback because no main text was present"
+	}
+	if p.page.Error != "" {
+		out = append(out,
+			reportmodel.Finding{ID: "agent.content_budget", Pillar: "agent", Title: "Estimated text token budget", Status: "unknown", Weight: 1, Tier: "recommended", Stage: "read", URL: p.page.URL, Evidence: p.page.Error, Remediation: "Keep the main page content concise and split long reference material into linked sections."},
+			reportmodel.Finding{ID: "geo.content_ratio", Pillar: "geo", Title: "Visible text to HTML ratio", Status: "unknown", Weight: 1, Tier: "recommended", Stage: "read", URL: p.page.URL, Evidence: p.page.Error, Remediation: "Ensure the initial HTML contains useful visible text without excessive markup or embedded boilerplate."},
+		)
+	} else {
+		tokens := (len(tokenText) + 3) / 4
+		budgetStatus := "pass"
+		if tokens > 30000 {
+			budgetStatus = "fail"
+		} else if tokens > 15000 {
+			budgetStatus = "partial"
+		}
+		out = append(out, reportmodel.Finding{ID: "agent.content_budget", Pillar: "agent", Title: "Estimated text token budget", Status: budgetStatus, Weight: 1, Tier: "recommended", Stage: "read", URL: p.page.URL, Evidence: fmt.Sprintf("Approximately %d tokens estimated from %s characters divided by four; this is a rough tokenizer-independent estimate", tokens, tokenSource), Remediation: "Keep the main page content concise and split long reference material into linked sections."})
+		ratio := 0.0
+		if p.htmlBytes > 0 {
+			ratio = float64(len(visibleText)) / float64(p.htmlBytes)
+		}
+		ratioStatus := "pass"
+		if ratio < .05 {
+			ratioStatus = "partial"
+		}
+		out = append(out, reportmodel.Finding{ID: "geo.content_ratio", Pillar: "geo", Title: "Visible text to HTML ratio", Status: ratioStatus, Weight: 1, Tier: "recommended", Stage: "read", URL: p.page.URL, Evidence: fmt.Sprintf("Visible initial-HTML text is %.1f%% of response bytes; this heuristic does not measure rendered or hidden content", ratio*100), Remediation: "Ensure the initial HTML contains useful visible text without excessive markup or embedded boilerplate."})
+	}
 	evidence := "HSTS header absent on HTTPS response; security observation, no score penalty"
 	if p.hsts != "" {
 		evidence = "HSTS header observed (policy not validated): " + excerpt(p.hsts)
