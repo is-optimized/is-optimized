@@ -17,11 +17,12 @@ type Report struct {
 	AgentReadiness       *AgentReadinessSummary `json:"agent_readiness,omitempty"`
 }
 type Page struct {
-	RequestedURL string `json:"requested_url,omitempty"`
-	URL          string `json:"url"`
-	StatusCode   int    `json:"status_code"`
-	Error        string `json:"error,omitempty"`
-	DurationMS   int64  `json:"duration_ms"`
+	RequestedURL  string `json:"requested_url,omitempty"`
+	URL           string `json:"url"`
+	StatusCode    int    `json:"status_code"`
+	RedirectCount int    `json:"redirect_count,omitempty"`
+	Error         string `json:"error,omitempty"`
+	DurationMS    int64  `json:"duration_ms"`
 }
 type Finding struct {
 	ID            string              `json:"id"`

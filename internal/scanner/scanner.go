@@ -66,6 +66,7 @@ type session struct {
 type response struct {
 	url         *url.URL
 	code        int
+	redirects   int
 	body        []byte
 	contentType string
 	header      http.Header
@@ -206,7 +207,7 @@ func (ss *session) fetchWithHeaders(raw string, content bool, site string, heade
 		resp.Body.Close()
 		<-ss.s.slots
 		cancel()
-		out = response{u, resp.StatusCode, data, resp.Header.Get("Content-Type"), resp.Header.Clone()}
+		out = response{url: u, code: resp.StatusCode, redirects: redirects, body: data, contentType: resp.Header.Get("Content-Type"), header: resp.Header.Clone()}
 		if errors.Is(e, errScanByteBudget) {
 			ss.scanByteBudgetExhaustions.Add(1)
 			return out, e
@@ -304,8 +305,9 @@ func (s *Scanner) Scan(ctx context.Context, domain string) (reportmodel.Report, 
 	if home.url != nil {
 		homeURL = home.url
 	}
+	homePage := pages[0]
 	siteChecks := make(chan []reportmodel.Finding, 1)
-	go func() { siteChecks <- siteAgentChecks(ss, homeURL, home, pages[0]) }()
+	go func() { siteChecks <- siteAgentChecks(ss, homeURL, home, homePage) }()
 	sitemapEvidence := "Not inspected"
 	if fetchErr == nil && pages[0].page.Error == "" {
 		links := selectLinks(pages[0].doc, home.url)

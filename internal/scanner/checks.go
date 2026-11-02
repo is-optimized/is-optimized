@@ -23,7 +23,7 @@ type pageResult struct {
 }
 
 func analyze(r response, err error, requested string, duration time.Duration) pageResult {
-	p := pageResult{page: reportmodel.Page{URL: requested, RequestedURL: requested, StatusCode: r.code, DurationMS: duration.Milliseconds()}, htmlBytes: len(r.body)}
+	p := pageResult{page: reportmodel.Page{URL: requested, RequestedURL: requested, StatusCode: r.code, RedirectCount: r.redirects, DurationMS: duration.Milliseconds()}, htmlBytes: len(r.body)}
 	if r.url != nil {
 		p.page.URL = r.url.String()
 	}
@@ -242,6 +242,7 @@ func Registry() []Check {
 		{ID: "seo.title", Pillar: "seo", Title: "Page title", Remediation: "Give this page a concise, descriptive title that distinguishes its purpose.", Weight: 2, Tier: "recommended"},
 		{ID: "seo.description", Pillar: "seo", Title: "Search description", Remediation: "Write an accurate page-specific meta description; do not promise that search engines will display it.", Weight: 1, Tier: "recommended"},
 		{ID: "seo.canonical", Pillar: "seo", Title: "Canonical reference", Remediation: "Provide one valid canonical URL that reflects the intended public version of this page.", Weight: 1, Tier: "recommended"},
+		{ID: "seo.redirect_hygiene", Pillar: "seo", Title: "Redirect and refresh hygiene", Remediation: "Avoid refresh/script redirect stubs on short content pages, redirect chains longer than two hops, and HTTPS downgrades.", Weight: 1, Tier: "recommended"},
 		{ID: "seo.headings", Pillar: "seo", Title: "Heading structure", Remediation: "Provide a meaningful H1 and use heading levels in a logical sequence.", Weight: 1, Tier: "recommended"},
 		{ID: "seo.viewport", Pillar: "seo", Title: "Mobile viewport declaration", Remediation: "Declare a viewport with width=device-width; verify actual mobile layout separately.", Weight: 1, Tier: "recommended"},
 		{ID: "seo.images", Pillar: "seo", Title: "Image text alternatives", Remediation: "Provide useful alternatives for informative images and empty alt attributes for decorative images.", Weight: 1, Tier: "recommended"},
@@ -260,6 +261,7 @@ func evaluate(p pageResult) []reportmodel.Finding {
 	out := make([]reportmodel.Finding, 0, len(registry))
 	var title, description, robotsMeta, canonical string
 	h1, emptyH1, skipped, previousLevel := 0, 0, 0, 0
+	metaRefresh, scriptRedirect := false, false
 	viewport := false
 	canonCount := 0
 	canonicalValues := map[string]bool{}
@@ -337,6 +339,9 @@ func evaluate(p pageResult) []reportmodel.Finding {
 		case "title":
 			title = text(n)
 		case "meta":
+			if strings.EqualFold(strings.TrimSpace(attr(n, "http-equiv")), "refresh") {
+				metaRefresh = true
+			}
 			if strings.EqualFold(attr(n, "property"), "og:type") && strings.EqualFold(strings.TrimSpace(attr(n, "content")), "article") {
 				article = true
 			}
@@ -413,6 +418,10 @@ func evaluate(p pageResult) []reportmodel.Finding {
 				unnamed++
 			}
 		case "script":
+			script := strings.ToLower(text(n))
+			if strings.Contains(script, "location.href") || strings.Contains(script, "location.replace") {
+				scriptRedirect = true
+			}
 			if strings.EqualFold(attr(n, "type"), "application/ld+json") {
 				var value any
 				if json.Unmarshal([]byte(text(n)), &value) == nil {
@@ -464,6 +473,27 @@ func evaluate(p pageResult) []reportmodel.Finding {
 				f.Evidence = excerpt(f.Evidence)
 			} else if canonical != p.page.URL {
 				f.Evidence += "; differs from fetched URL; may be intentional, target not fetched"
+			}
+		case "seo.redirect_hygiene":
+			words := len(strings.Fields(visible.String()))
+			issues := []string{}
+			if metaRefresh {
+				issues = append(issues, "meta refresh observed")
+			}
+			if scriptRedirect && words < 200 {
+				issues = append(issues, "location redirect script on a page under 200 words")
+			}
+			if p.page.RedirectCount > 2 {
+				issues = append(issues, fmt.Sprintf("%d redirect hops", p.page.RedirectCount))
+			}
+			if strings.HasPrefix(strings.ToLower(p.page.URL), "http://") {
+				issues = append(issues, "final response downgraded from HTTPS")
+			}
+			if len(issues) > 0 {
+				f.Status = "fail"
+				f.Evidence = strings.Join(issues, "; ")
+			} else {
+				f.Evidence = fmt.Sprintf("No meta refresh, short-page location redirect stub, redirect chain over two hops, or HTTPS downgrade observed; %d redirect hop(s)", p.page.RedirectCount)
 			}
 		case "seo.headings":
 			f.Evidence = fmt.Sprintf("%d H1 elements; %d empty H1s; %d upward level skips in document order", h1, emptyH1, skipped)
