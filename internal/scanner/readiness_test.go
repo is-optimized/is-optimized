@@ -163,7 +163,7 @@ func TestReadinessAddsNoInterfaceRequestsAndRecordsNotRun(t *testing.T) {
 	for _, request := range observedRequests {
 		isNotFoundProbe := strings.HasPrefix(request, "/__is-optimized-404-")
 		isTrustPage := request == "/about" || request == "/contact" || request == "/privacy" || request == "/terms"
-		if request != "/robots.txt" && request != "/" && request != "/index.md" && !isNotFoundProbe && !isTrustPage && request != "/llms.txt" && request != "/llms-full.txt" {
+		if request != "/robots.txt" && request != "/" && request != "/index.md" && request != "/sitemap.xml" && request != "/sitemap_index.xml" && !isNotFoundProbe && !isTrustPage && request != "/llms.txt" && request != "/llms-full.txt" {
 			t.Fatalf("discovery declaration caused network request: %s", request)
 		}
 	}

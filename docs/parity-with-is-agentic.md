@@ -78,7 +78,7 @@ deliberate: an existing related heuristic is not treated as equivalent coverage.
 | MCP discovery, read-only initialization/list methods, schemas, annotations and errors | `agent.mcp.*` | `agent.act.interfaces` (discovery only) | Pending; strictly restrict calls to the read-only methods specified by the prompt. |
 | MCP registry/card/apps metadata | `agent.mcp_registry.*` | None | Pending; registry listing is off-site and may require a supported public source. |
 | Developer portal, SDK, CLI, sandbox, pricing and GitHub linkage | `agent.developer_surfaces.*` | `agent.find.docs`, `agent.read.pricing` (partial) | Pending; distinguish first-party observed links from off-site registry claims. |
-| Quality and modularity of llms/agent files | `agent.instructions.*` | `agent.find.resources` (discovery only) | Pending; validate bounded Markdown/JSON and sampled same-origin links. |
+| Quality and modularity of llms/agent files | `agent.instructions.quality`, `agent.instructions.when_to_use`, `agent.instructions.full` | `agent.find.resources` (discovery only) | Implemented partially for llms.txt Markdown structure, size, fences, five sampled links, explicit use guidance, and llms-full presence. AGENTS.md, skills indexes, AI catalogs, ARD, and modular quality remain. |
 | Commerce profile and Product/Offer signals | `agent.commerce.*` | `geo.entity` (partial) | Pending; applicability depends on site type; no checkout or purchase actions. |
 | Search/entity discoverability | `agent.discoverability.*` | None | Pending; search-key-dependent checks remain not observed when unavailable. |
 | Accessible controls, labels and landmarks | `agent.accessibility.*` | `agent.controls`, `agent.links`, `agent.landmarks` (partial) | Pending; keep static HTML evidence limits explicit. |
@@ -96,7 +96,7 @@ does not imply that the check already exists.
 | Upstream issue ID | Tier | Reports with failed/partial issue | Is-optimized mapping | Mapping status |
 | --- | --- | --- | --- | --- |
 | `agent-friendly-404` | Essential | prosody.chat, github.com, gymshark.com, is-optimized.com | `agent.markdown_404` | Implemented site-level response probe; pending candidate live-site verification. |
-| `agent-instruction` | Recommended | prosody.chat, gymshark.com, parallel.ai, is-optimized.com | `agent.instructions.when_to_use` | Existing link discovery is insufficient; content-quality check planned. |
+| `agent-instruction` | Recommended | prosody.chat, gymshark.com, parallel.ai, is-optimized.com | `agent.instructions.when_to_use` | Implemented explicit guidance presence check; candidate live-site evidence remains. |
 | `agentic-search-specific` | Recommended | prosody.chat, gymshark.com, parallel.ai | `agent.discoverability.docs` | Search-provider/key dependent; not observed without a configured source. |
 | `api-error-model` | Recommended | github.com | `agent.openapi.error_schema` | Planned contract parsing. |
 | `api-schema-analysis` | Recommended | github.com, gymshark.com | `agent.openapi.complexity` | Planned bounded schema analysis. |
