@@ -29,8 +29,11 @@ capped at 100. Labels describe score bands, not rankings or agent task success.
 These are initial weights pending calibration against the captured public
 reports.
 
-The current Agent readiness inventory includes sampled page checks plus two
-site-level checks: `agent.markdown` exercises `Accept: text/markdown` on the
+The current Agent readiness inventory includes sampled page checks plus three
+site-level checks. `agent.robots` reports named retrieval and training bot
+rules, `Content-Signal` directives, and compares four retrieval user-agent GET
+responses with the normal homepage response. Training-agent blocking is
+informational. `agent.markdown` exercises `Accept: text/markdown` on the
 homepage, checks `Vary: Accept`, and probes `/index.md` as a fallback;
 `agent.markdown_404` makes a unique nonexistent-path request using both HTML
 and Markdown Accept headers. These probes run concurrently through the same
@@ -60,6 +63,7 @@ bot wall is never interpreted as a fully observed failing site.
 | `agent.landmarks` | 1 | Pass with main and nav elements; partial otherwise. | Initial implementation checks native landmarks, not every equivalent ARIA role. |
 | `agent.controls` | 2 | Not applicable without controls; pass for names on all controls; partial otherwise. | Observes common label and ARIA mechanisms; does not execute interactions or claim a complete accessibility audit. |
 | `agent.links` | 1 | Not applicable without links; pass for names on all links; partial otherwise. | Observes visible/accessible names, not whether every navigation destination works. |
+| `agent.robots` | 3 | Essential. Pass when all four retrieval agents are allowed by the parsed robots rules and return HTTP 200 with at least 80% of the normal homepage response bytes; fail for a robots block, 401/403, or obvious challenge body; unknown on unavailable/malformed policy or incomplete fetch. | Training-agent rules and Content-Signal are informational; response similarity is byte-count based, not semantic equivalence. |
 | `agent.markdown` | 3 | Essential. Pass when Markdown negotiation returns non-HTML Markdown, `Vary: Accept`, and the normal homepage response is HTML; partial when only one negotiation signal is present; fail when neither negotiation nor `/index.md` works; unknown on fetch failure. | One homepage and one fallback probe; frontmatter, code fences, and alternate-link targets are not evaluated. |
 | `agent.markdown_404` | 3 | Essential. Pass for HTML and Markdown 404/410 responses with a Markdown body of at least 20 characters containing a link; partial for correct status without a qualified Markdown body; fail for soft 404 or other status; unknown when either request fails. | Unique path and GET only; link destination and page-specific error behavior are not validated. |
 

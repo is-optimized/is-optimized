@@ -62,7 +62,7 @@ deliberate: an existing related heuristic is not treated as equivalent coverage.
 
 | Is-agentic topic | Planned stable check ID | Existing mapping | State / boundary |
 | --- | --- | --- | --- |
-| Robots directives for named AI crawlers and `Content-Signal` | `agent.robots` | `seo.index` (partial) | Pending; distinguish retrieval from training policy and show per-bot unspecified/allowed/blocked. |
+| Robots directives for named AI crawlers and `Content-Signal` | `agent.robots` | `seo.index` (partial) | Implemented partially: reports specified/unspecified rules and Content-Signal, plus four retrieval-UA status/body-size probes; challenge detection is heuristic and policy matrix is not full protocol certification. |
 | Retrieval-agent vs browser response parity | `agent.retrieval_access` | `agent.access` (partial) | Pending; bounded read-only GET probes; compare status and body length. |
 | Sitemap validity, same-host URLs, sample freshness | `seo.sitemap_quality` | `seo.sitemap` (partial) | Pending; existing bounded discovery is not full quality coverage. |
 | Markdown negotiation, fallback files, alternate links and format quality | `agent.markdown` | None | Implemented partially: homepage Accept probe, Vary check, `/index.md` fallback; frontmatter, code fences, and alternate-link target validation remain. |

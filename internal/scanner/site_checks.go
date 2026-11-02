@@ -14,12 +14,124 @@ import (
 )
 
 func siteAgentChecks(ss *session, home *url.URL, homepage response) []reportmodel.Finding {
-	results := make(chan reportmodel.Finding, 2)
+	if homepage.code == 0 {
+		return []reportmodel.Finding{
+			{ID: "agent.markdown", Pillar: "agent", Title: "Markdown content negotiation", Status: "unknown", Weight: 3, Tier: "essential", URL: origin(home) + "/", Evidence: "Homepage response unavailable; site-level representation was not probed."},
+			{ID: "agent.markdown_404", Pillar: "agent", Title: "Markdown-aware not-found response", Status: "unknown", Weight: 3, Tier: "essential", URL: origin(home), Evidence: "Homepage response unavailable; not-found behavior was not probed."},
+			{ID: "agent.robots", Pillar: "agent", Title: "AI crawler access policy", Status: "unknown", Weight: 3, Tier: "essential", URL: origin(home) + "/robots.txt", Evidence: "Homepage response unavailable; retrieval behavior was not probed."},
+		}
+	}
+	results := make(chan reportmodel.Finding, 3)
 	go func() { results <- markdownNegotiationCheck(ss, home, homepage) }()
 	go func() { results <- markdownNotFoundCheck(ss, home) }()
-	out := []reportmodel.Finding{<-results, <-results}
+	go func() { results <- aiCrawlerAccessCheck(ss, home, homepage) }()
+	out := []reportmodel.Finding{<-results, <-results, <-results}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
+}
+
+func aiCrawlerAccessCheck(ss *session, home *url.URL, homepage response) reportmodel.Finding {
+	f := reportmodel.Finding{
+		ID: "agent.robots", Pillar: "agent", Title: "AI crawler access policy", Status: "unknown",
+		Weight: 3, Tier: "essential", Stage: "find", URL: origin(home) + "/robots.txt",
+		Applicability: "Reports the published robots policy and read-only retrieval behavior; crawler policy choices are controlled by the site owner.",
+		Remediation:   "Allow retrieval agents you intend to serve in robots.txt. Training-bot restrictions are a valid policy choice and are not penalized.",
+	}
+	policy := ss.getPolicy(home)
+	if policy.err != nil {
+		f.Evidence = "robots.txt policy was unavailable or malformed; agent rules and Content-Signal directives could not be evaluated."
+		return f
+	}
+	retrieval := []string{"ChatGPT-User", "OAI-SearchBot", "Claude-User", "PerplexityBot"}
+	type result struct {
+		ua        string
+		allowed   bool
+		specified bool
+		resp      response
+		err       error
+	}
+	results := make(chan result, len(retrieval))
+	for _, ua := range retrieval {
+		go func(ua string) {
+			allowed, specified := policy.rules.decision(ua, "/")
+			if !allowed {
+				results <- result{ua: ua, allowed: false, specified: specified, err: fmt.Errorf("disallowed by robots policy")}
+				return
+			}
+			headers := make(http.Header)
+			headers.Set("User-Agent", ua)
+			r, err := ss.probeHeaders(origin(home)+"/", origin(home), headers)
+			results <- result{ua: ua, allowed: allowed, specified: specified, resp: r, err: err}
+		}(ua)
+	}
+	var lines []string
+	blocked := false
+	unobserved := false
+	for range retrieval {
+		r := <-results
+		if r.specified {
+			state := "allowed"
+			if !r.allowed {
+				state = "blocked"
+				blocked = true
+			}
+			lines = append(lines, fmt.Sprintf("robots %s: %s", r.ua, state))
+		} else {
+			lines = append(lines, fmt.Sprintf("robots %s: unspecified (allowed by default)", r.ua))
+		}
+		if r.err != nil {
+			unobserved = true
+			lines = append(lines, fmt.Sprintf("live %s: unobserved (%s)", r.ua, r.err.Error()))
+			continue
+		}
+		ratio := 0.0
+		if len(homepage.body) > 0 {
+			ratio = float64(len(r.resp.body)) / float64(len(homepage.body))
+		}
+		lines = append(lines, fmt.Sprintf("live %s: HTTP %d, %d%% of browser response bytes", r.ua, r.resp.code, int(ratio*100)))
+		if r.resp.code == http.StatusForbidden || r.resp.code == http.StatusUnauthorized || challengeBody(r.resp.body) {
+			blocked = true
+		}
+		if r.resp.code != http.StatusOK || ratio < .8 {
+			unobserved = true
+		}
+	}
+	if !policy.present {
+		lines = append(lines, "robots.txt has no rules: everything is allowed by default")
+	}
+	if len(policy.rules.contentSignals) > 0 {
+		lines = append(lines, "Content-Signal: "+strings.Join(policy.rules.contentSignals, "; "))
+	} else {
+		lines = append(lines, "No Content-Signal directive observed")
+	}
+	training := []string{"GPTBot", "ClaudeBot", "anthropic-ai", "Google-Extended", "Applebot-Extended", "CCBot", "Bytespider", "meta-externalagent"}
+	var trainingMatrix []string
+	for _, ua := range training {
+		allowed, specified := policy.rules.decision(ua, "/")
+		state := "unspecified (allowed by default)"
+		if specified {
+			state = "allowed"
+			if !allowed {
+				state = "blocked"
+			}
+		}
+		trainingMatrix = append(trainingMatrix, ua+"="+state)
+	}
+	lines = append(lines, "Training-bot policy (informational): "+strings.Join(trainingMatrix, ", "))
+	f.Evidence = excerpt(strings.Join(lines, "; "))
+	if blocked {
+		f.Status = "fail"
+	} else if unobserved {
+		f.Status = "unknown"
+	} else {
+		f.Status = "pass"
+	}
+	return f
+}
+
+func challengeBody(body []byte) bool {
+	text := strings.ToLower(string(body))
+	return strings.Contains(text, "captcha") || strings.Contains(text, "challenge-platform") || strings.Contains(text, "access denied")
 }
 
 func markdownNegotiationCheck(ss *session, home *url.URL, homepage response) reportmodel.Finding {
