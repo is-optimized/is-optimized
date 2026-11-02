@@ -38,9 +38,13 @@ func siteAgentChecks(ss *session, home *url.URL, homepage response, homepagePage
 			{ID: "agent.openapi.errors", Pillar: "agent", Title: "Typed OpenAPI responses", Status: "unknown", Weight: 1, Tier: "recommended", URL: origin(home) + "/openapi.json", Evidence: "Homepage response unavailable; public API contracts were not probed."},
 			{ID: "agent.openapi.scopes", Pillar: "agent", Title: "Scoped API permissions", Status: "unknown", Weight: 1, Tier: "essential", URL: origin(home) + "/openapi.json", Evidence: "Homepage response unavailable; public API contracts were not probed."},
 			{ID: "agent.openapi.versioning", Pillar: "agent", Title: "API version metadata", Status: "unknown", Weight: 1, Tier: "recommended", URL: origin(home) + "/openapi.json", Evidence: "Homepage response unavailable; public API contracts were not probed."},
+			{ID: "agent.oauth.discovery", Pillar: "agent", Title: "OAuth/OIDC metadata discovery", Status: "unknown", Weight: 2, Tier: "essential", URL: origin(home) + "/.well-known/oauth-authorization-server", Evidence: "Homepage response unavailable; authentication metadata was not probed."},
+			{ID: "agent.oauth.pkce", Pillar: "agent", Title: "OAuth S256 PKCE support", Status: "unknown", Weight: 2, Tier: "essential", URL: origin(home) + "/.well-known/oauth-authorization-server", Evidence: "Homepage response unavailable; authentication metadata was not probed."},
+			{ID: "agent.oauth.scopes", Pillar: "agent", Title: "OAuth scope discovery", Status: "unknown", Weight: 1, Tier: "recommended", URL: origin(home) + "/.well-known/oauth-authorization-server", Evidence: "Homepage response unavailable; authentication metadata was not probed."},
+			{ID: "agent.oauth.protected_resource", Pillar: "agent", Title: "Protected-resource metadata", Status: "unknown", Weight: 1, Tier: "recommended", URL: origin(home) + "/.well-known/oauth-protected-resource", Evidence: "Homepage response unavailable; authentication metadata was not probed."},
 		}
 	}
-	results := make(chan reportmodel.Finding, 19)
+	results := make(chan reportmodel.Finding, 23)
 	go func() { results <- markdownNegotiationCheck(ss, home, homepage) }()
 	go func() { results <- markdownNotFoundCheck(ss, home) }()
 	go func() { results <- aiCrawlerAccessCheck(ss, home, homepage) }()
@@ -63,7 +67,12 @@ func siteAgentChecks(ss *session, home *url.URL, homepage response, homepagePage
 			results <- f
 		}
 	}()
-	out := make([]reportmodel.Finding, 0, 19)
+	go func() {
+		for _, f := range oauthChecks(ss, home, homepagePage) {
+			results <- f
+		}
+	}()
+	out := make([]reportmodel.Finding, 0, 23)
 	for i := 0; i < cap(results); i++ {
 		out = append(out, <-results)
 	}

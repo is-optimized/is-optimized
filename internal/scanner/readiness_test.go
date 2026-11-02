@@ -138,7 +138,7 @@ func TestReadinessRejectsUnsafeOrCredentialBearingLinks(t *testing.T) {
 	}
 }
 
-func TestReadinessAddsNoInterfaceRequestsAndRecordsNotRun(t *testing.T) {
+func TestReadinessProbesAdvertisedContractsAndRecordsUnrunInterfaces(t *testing.T) {
 	var requested []string
 	var requestedMu sync.Mutex
 	s := fixtureScanner(roundTrip(func(r *http.Request) (*http.Response, error) {
@@ -160,10 +160,16 @@ func TestReadinessAddsNoInterfaceRequestsAndRecordsNotRun(t *testing.T) {
 	requestedMu.Lock()
 	observedRequests := append([]string(nil), requested...)
 	requestedMu.Unlock()
+	allowedDiscoveryRoutes := map[string]bool{
+		"/robots.txt": true, "/index.md": true, "/sitemap.xml": true, "/sitemap_index.xml": true,
+		"/openapi.json": true, "/openapi.yaml": true, "/swagger.json": true, "/api/openapi.json": true,
+		"/.well-known/oauth-authorization-server": true, "/.well-known/openid-configuration": true, "/.well-known/oauth-protected-resource": true,
+		"/llms.txt": true, "/llms-full.txt": true,
+	}
 	for _, request := range observedRequests {
 		isNotFoundProbe := strings.HasPrefix(request, "/__is-optimized-404-")
 		isTrustPage := request == "/about" || request == "/contact" || request == "/privacy" || request == "/terms"
-		if request != "/robots.txt" && request != "/" && request != "/index.md" && request != "/sitemap.xml" && request != "/sitemap_index.xml" && request != "/openapi.json" && !isNotFoundProbe && !isTrustPage && request != "/llms.txt" && request != "/llms-full.txt" {
+		if request != "/" && !allowedDiscoveryRoutes[request] && !isNotFoundProbe && !isTrustPage {
 			t.Fatalf("discovery declaration caused network request: %s", request)
 		}
 	}
