@@ -97,7 +97,7 @@ func NormalizeDomain(input string) (string, error) {
 }
 func secureTransport() *http.Transport {
 	d := &net.Dialer{Timeout: 3 * time.Second, KeepAlive: 30 * time.Second}
-	return &http.Transport{Proxy: nil, MaxIdleConns: 32, MaxIdleConnsPerHost: 4, MaxConnsPerHost: 4, IdleConnTimeout: 30 * time.Second, TLSHandshakeTimeout: 3 * time.Second, ResponseHeaderTimeout: 5 * time.Second, MaxResponseHeaderBytes: 64 << 10,
+	return &http.Transport{Proxy: nil, MaxIdleConns: 32, MaxIdleConnsPerHost: 4, MaxConnsPerHost: 4, IdleConnTimeout: 30 * time.Second, TLSHandshakeTimeout: 3 * time.Second, ResponseHeaderTimeout: 10 * time.Second, MaxResponseHeaderBytes: 64 << 10,
 		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
 			host, port, err := net.SplitHostPort(address)
 			if err != nil {
