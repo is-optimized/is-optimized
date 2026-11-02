@@ -47,7 +47,7 @@ metadata, unless the evidence row says otherwise.
 | Article attribution | `geo.author` | Weighted; applicability now requires Article/BlogPosting/NewsArticle JSON-LD or `og:type=article`; an HTML `<article>` wrapper alone is not enough. |
 | Navigation landmarks | `agent.landmarks` | Weighted `main`/`nav` presence heuristic. |
 | Named controls and links | `agent.controls`, `agent.links` | Weighted accessible-name heuristics; no browser accessibility tree. |
-| Sitemap declaration | `seo.sitemap` | Informational sitemap discovery evidence; sitemap quality and freshness scoring are not implemented. |
+| Sitemap declaration | `seo.sitemap_quality`, `seo.sitemap_freshness` | Bounded XML validation, same-origin candidate collection, and first-500 `lastmod` sample; no full sitemap certification. |
 | HSTS and initial HTML word count | `seo.hsts`, `seo.words` | Informational only in the current methodology. |
 | Sampled page outcome | `seo.page_status` | Informational requested/final URL and status evidence. |
 | Linked docs and pricing | `agent.find.docs`, `agent.read.pricing` | Zero-weight discovery observations; links are not fetched or validated. |
@@ -64,7 +64,7 @@ deliberate: an existing related heuristic is not treated as equivalent coverage.
 | --- | --- | --- | --- |
 | Robots directives for named AI crawlers and `Content-Signal` | `agent.robots` | `seo.index` (partial) | Implemented partially: reports specified/unspecified rules and Content-Signal, plus four retrieval-UA status/body-size probes; challenge detection is heuristic and policy matrix is not full protocol certification. |
 | Retrieval-agent vs browser response parity | `agent.retrieval_access` | `agent.access` (partial) | Pending; bounded read-only GET probes; compare status and body length. |
-| Sitemap validity, same-host URLs, sample freshness | `seo.sitemap_quality` | `seo.sitemap` (partial) | Pending; existing bounded discovery is not full quality coverage. |
+| Sitemap validity, same-host URLs, sample freshness | `seo.sitemap_quality`, `seo.sitemap_freshness` | `seo.sitemap` (partial) | Implemented with robots-declared then conventional-path fallbacks; up to five sitemap documents and 5,000 candidate URLs, freshness sampled over up to 500 entries. |
 | Markdown negotiation, fallback files, alternate links and format quality | `agent.markdown` | None | Implemented partially: homepage Accept probe, Vary check, `/index.md` fallback; frontmatter, code fences, and alternate-link target validation remain. |
 | HTML and Markdown error routes | `agent.markdown_404` | None | Implemented: unique-path HTML/Markdown GET probes; validates 404/410, Markdown media type, minimum body length, and link syntax, but not link destination. |
 | Refresh/script redirect stubs, chains and host/scheme consistency | `seo.redirect_hygiene` | `seo.page_status` (partial) | Implemented partially: checks meta refresh, short-page location stubs, recorded chain length, and HTTPS downgrade; no final cross-page apex/www consistency analysis. |
@@ -122,7 +122,7 @@ does not imply that the check already exists.
 | `rate-limit-headers` | Recommended | vercel.com, github.com, galileo.ai, parallel.ai | `agent.api.rate_limits` | Planned; probe safe unauthenticated GET responses only. |
 | `redirect-hygiene` | Essential | gymshark.com | `seo.redirect_hygiene` | Existing requested/final URL evidence is partial; chain/markup checks planned. |
 | `scoped-permissions` | Essential | vercel.com, gymshark.com | `agent.openapi.scopes` | Planned scope parsing; no authorization or token exchange. |
-| `sitemap` | Recommended | prosody.chat, is-optimized.com | `seo.sitemap_quality` | Existing sitemap discovery is partial; index/URL/freshness validation planned. |
+| `sitemap` | Recommended | prosody.chat, is-optimized.com | `seo.sitemap_quality` | Implemented bounded validity and same-origin check; candidate live-site evidence remains. |
 | `trust-anchors` | Recommended | prosody.chat, galileo.ai, gymshark.com, is-optimized.com | `geo.trust_pages` | Planned bounded probes for about/contact/privacy/terms. |
 
 Captured Is-Optimized production baselines use the older `2026-10-agentready-v1`

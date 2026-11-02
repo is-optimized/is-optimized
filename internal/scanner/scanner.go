@@ -308,11 +308,10 @@ func (s *Scanner) Scan(ctx context.Context, domain string) (reportmodel.Report, 
 	homePage := pages[0]
 	siteChecks := make(chan []reportmodel.Finding, 1)
 	go func() { siteChecks <- siteAgentChecks(ss, homeURL, home, homePage) }()
-	sitemapEvidence := "Not inspected"
 	if fetchErr == nil && pages[0].page.Error == "" {
 		links := selectLinks(pages[0].doc, home.url)
-		sitemapLinks, evidence := sitemapURLs(ss, home.url)
-		sitemapEvidence = evidence
+		sitemapLinks, _, sitemapFindings := sitemapURLs(ss, home.url)
+		report.Findings = append(report.Findings, sitemapFindings...)
 		selected := selectRepresentative(append(links, sitemapLinks...), home.url, maxContentPages-1)
 		results := ss.fetchPages(selected, home.url)
 		pages = append(pages, results...)
@@ -346,10 +345,6 @@ func (s *Scanner) Scan(ctx context.Context, domain string) (reportmodel.Report, 
 				evidence = fmt.Sprintf("HTTP %d; %d bytes", r.code, len(r.body))
 			}
 			report.Findings = append(report.Findings, reportmodel.Finding{ID: "agent.discovery" + path, Pillar: "agent", Title: "Emerging machine-readable content", Status: "information", URL: origin(home.url) + path, Evidence: evidence, Remediation: "Consider a concise, accurate machine-readable summary if useful to your audience; presence alone does not prove agent compatibility."})
-		}
-		p := ss.getPolicy(home.url)
-		if len(p.rules.sitemaps) > 0 {
-			report.Findings = append(report.Findings, reportmodel.Finding{ID: "seo.sitemap", Pillar: "seo", Title: "Declared sitemap", Status: "information", URL: p.rules.sitemaps[0], Evidence: sitemapEvidence, Remediation: "Maintain a valid sitemap containing canonical public URLs."})
 		}
 	}
 	for _, p := range pages {
