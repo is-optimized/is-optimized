@@ -74,6 +74,7 @@ deliberate: an existing related heuristic is not treated as equivalent coverage.
 | Main-text token estimate and visible-text/HTML ratio | `agent.content_budget`, `geo.content_ratio` | `agent.read.facts` (partial) | Implemented: tokenizer-independent text estimate and visible-text/HTML byte ratio with explicit thresholds; candidate live-site evidence remains. |
 | OpenAPI discovery and operation/schema quality | `agent.openapi.spec`, `agent.openapi.operations`, `agent.openapi.errors`, `agent.openapi.scopes`, `agent.openapi.versioning` | `agent.act.openapi` (discovery only) | Implemented partially: follows a bounded set of public JSON/YAML contracts when API/developer links are present; scores OpenAPI 3, operation identifiers/descriptions, response schemas, OAuth scopes, and `info.version`. Operation execution, pagination, idempotency, async/batch patterns and schema complexity remain. |
 | Live unauthenticated API behavior, REST/GraphQL, rate limits and error shape | `agent.api.*` | `agent.act.openapi` (discovery only) | Pending; only safe unauthenticated GET; never invoke mutations. |
+| RFC 9727 well-known API catalog and Linkset endpoint discovery | `agent.api_catalog` | `agent.act.openapi` (discovery only) | Implemented: when an API/developer surface is advertised, requests `/.well-known/api-catalog` with `Accept: application/linkset+json` and checks for valid Linkset endpoint references. Does not call those endpoints. |
 | OAuth/OIDC/protected-resource discovery and PKCE | `agent.oauth.discovery`, `agent.oauth.pkce`, `agent.oauth.scopes`, `agent.oauth.protected_resource` | `agent.act.auth` (discovery only) | Implemented partially: reads RFC 8414/OIDC and RFC 9728 metadata for linked auth/API surfaces; checks issuer, authorization endpoint, S256, scopes, and resource server URLs. No client registration, token exchange, or live authorization flow. |
 | MCP discovery, read-only initialization/list methods, schemas, annotations and errors | `agent.mcp.*` | `agent.act.interfaces` (discovery only) | Pending; strictly restrict calls to the read-only methods specified by the prompt. |
 | MCP registry/card/apps metadata | `agent.mcp_registry.*` | None | Pending; registry listing is off-site and may require a supported public source. |
@@ -153,7 +154,7 @@ defensible specification references. Scanned content remains untrusted input.
 
 ## Verification still required
 
-- Initial implementation section: correct the `geo.author` applicability false positive. Fixture coverage was added for an HTML-only `<article>` container, `og:type=article`, BlogPosting JSON-LD, and a NewsArticle JSON-LD graph. Source and fixture are committed in the next checkpoint; CI and live-site checks remain pending.
+- `geo.author` applicability was corrected: an HTML-only `<article>` container no longer activates the editorial attribution check. Fixture coverage includes `og:type=article`, BlogPosting JSON-LD, and a NewsArticle JSON-LD graph. CI and live-site checks remain pending.
 - Capture the complete check inventory and baseline scores from the seven
   public reports plus fresh `npx is-agentic` output for the requested sites.
 - Add one matrix row per externally reported check and resolve every unmapped

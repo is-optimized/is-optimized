@@ -352,6 +352,7 @@ func (s *Scanner) Scan(ctx context.Context, domain string) (reportmodel.Report, 
 		report.Findings = append(report.Findings, evaluate(p)...)
 	}
 	report.Findings = append(report.Findings, <-siteChecks...)
+	report.Findings = append(report.Findings, apiCatalogChecks(ss, homeURL, homePage)...)
 	report.Findings = markDuplicates(report.Findings, pages)
 	annotateReadiness(report.Findings)
 	report.Pillars = score(report.Findings)
