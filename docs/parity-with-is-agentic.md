@@ -82,7 +82,7 @@ deliberate: an existing related heuristic is not treated as equivalent coverage.
 | Commerce profile and Product/Offer signals | `agent.commerce.*` | `geo.entity` (partial) | Pending; applicability depends on site type; no checkout or purchase actions. |
 | Search/entity discoverability | `agent.discoverability.*` | None | Pending; search-key-dependent checks remain not observed when unavailable. |
 | Accessible controls, labels and landmarks | `agent.accessibility.*` | `agent.controls`, `agent.links`, `agent.landmarks` (partial) | Pending; keep static HTML evidence limits explicit. |
-| Hidden prompt-instruction indicators | `agent.prompt_injection_signals` | None | Pending; detection reports evidence only and never follows or executes text. |
+| Hidden prompt-instruction indicators | `agent.prompt_injection_signals` | None | Implemented as an informational-only pattern signal across hidden text and selected accessibility attributes; matched text is omitted from evidence and never followed or executed. |
 | Site-type declaration and applicable check selection | `site.type` | Existing per-check applicability | Pending; extend the existing mechanism instead of introducing a parallel one. |
 | Optional observed task evaluation | `agent.task_evaluation` | `Report.BehavioralEvaluation` | `not_run` by default; opt-in, off-score, and needs separate cost/credential authorization. |
 
