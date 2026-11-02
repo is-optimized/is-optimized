@@ -399,7 +399,7 @@ func TestEssentialDiscoveryChecksRunBeforeOptionalChecksAtBudgetBoundary(t *test
 	ss := &session{s: s, ctx: context.Background(), policies: map[string]policy{
 		origin(home): {present: true, status: http.StatusOK, rules: robots{}},
 	}}
-	ss.discovery.Store(maxDiscoveryCount - 12)
+	ss.discovery.Store(maxDiscoveryCount - 15)
 	homepage, err := ss.fetch(home.String(), false, origin(home))
 	if err != nil {
 		t.Fatal(err)
@@ -415,6 +415,32 @@ func TestEssentialDiscoveryChecksRunBeforeOptionalChecksAtBudgetBoundary(t *test
 		if !ok || f.Status == "unknown" || strings.Contains(f.Evidence, "discovery budget exhausted") {
 			t.Errorf("essential discovery %s was starved at budget boundary: %+v", id, f)
 		}
+	}
+}
+
+func TestPageRequestPartitionReservesDiscoveryBudget(t *testing.T) {
+	home, _ := url.Parse("https://example.com/")
+	s := fixtureScanner(func(r *http.Request) (*http.Response, error) {
+		return reply(r, http.StatusOK, "ok", "text/plain"), nil
+	})
+	ss := &session{s: s, ctx: context.Background(), policies: map[string]policy{
+		origin(home): {present: true, status: http.StatusOK, rules: robots{}},
+	}}
+	for i := 0; i < maxPageRequests; i++ {
+		if _, err := ss.fetchPage("https://example.com/page", origin(home)); err != nil {
+			t.Fatalf("page request %d was rejected early: %v", i+1, err)
+		}
+	}
+	if _, err := ss.fetchPage("https://example.com/page", origin(home)); err == nil || !strings.Contains(err.Error(), "page request budget") {
+		t.Fatalf("page request after reserved page partition should be rejected, got %v", err)
+	}
+	for i := 0; i < maxDiscoveryCount; i++ {
+		if _, err := ss.probe("https://example.com/probe", origin(home)); err != nil {
+			t.Fatalf("discovery request %d was starved by page fetches: %v", i+1, err)
+		}
+	}
+	if got := ss.requests.Load(); got != maxRequestCount {
+		t.Fatalf("total request count=%d, want exact partition total %d", got, maxRequestCount)
 	}
 }
 
@@ -676,6 +702,7 @@ func TestRequestBudget(t *testing.T) {
 		t.Fatalf("request budget exhaustion metric=%d, want 1", got)
 	}
 }
+
 func TestFetchBudgetExhaustionMetrics(t *testing.T) {
 	s := fixtureScanner(func(r *http.Request) (*http.Response, error) {
 		return reply(r, 200, strings.Repeat("x", maxBody+1), "text/html"), nil

@@ -84,6 +84,7 @@ func TestOpenAPISpecFindingRejectsInvalidRootVersionAndMetadata(t *testing.T) {
 		`{"openapi":"3.bogus","info":{"title":"Example","version":"v1"},"paths":{"/x":{"get":{}}}}`,
 		`{"openapi":"3.1.0","paths":{"/x":{"get":{}}}}`,
 		`{"openapi":"3.1.0","info":{"version":"v1"},"paths":{"/x":{"get":{}}}}`,
+		`{"openapi":"3.2.1","info":{"title":"Example","version":"v1"}}`,
 	} {
 		doc, _, err := decodeOpenAPI([]byte(body))
 		if err != nil {
@@ -94,7 +95,7 @@ func TestOpenAPISpecFindingRejectsInvalidRootVersionAndMetadata(t *testing.T) {
 			t.Errorf("invalid OpenAPI root unexpectedly passed: %+v", findings[0])
 		}
 	}
-	valid, _, err := decodeOpenAPI([]byte(`{"openapi":"3.2.1","info":{"title":"Example","version":"v1"}}`))
+	valid, _, err := decodeOpenAPI([]byte(`{"openapi":"3.2.1","info":{"title":"Example","version":"v1"},"paths":{}}`))
 	if err != nil {
 		t.Fatal(err)
 	}

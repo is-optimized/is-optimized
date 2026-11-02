@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 
 	"github.com/is-optimized/is-optimized/internal/reportmodel"
 	"golang.org/x/net/html"
@@ -23,23 +24,50 @@ func oauthChecks(ss *session, home *url.URL, page pageResult) []reportmodel.Find
 		findings := oauthFindings(origin(home)+"/.well-known/oauth-authorization-server", nil, false, nil)
 		return append(findings, oauthResourceFinding(nil, home, false, nil))
 	}
+	type metadataProbe struct {
+		path      string
+		candidate string
+		response  response
+		err       error
+	}
+	paths := []string{"/.well-known/oauth-authorization-server", "/.well-known/openid-configuration"}
+	results := make([]metadataProbe, len(paths))
+	var wg sync.WaitGroup
+	for i, path := range paths {
+		wg.Add(1)
+		go func(i int, path string) {
+			defer wg.Done()
+			candidate := origin(home) + path
+			r, err := ss.probe(candidate, origin(home))
+			results[i] = metadataProbe{path: path, candidate: candidate, response: r, err: err}
+		}(i, path)
+	}
+	resourceResult := make(chan reportmodel.Finding, 1)
+	go func() { resourceResult <- oauthResourceFinding(ss, home, true, nil) }()
+	wg.Wait()
+	resourceFinding := <-resourceResult
 	var lastErr error
-	var evidence string
-	for _, path := range []string{"/.well-known/oauth-authorization-server", "/.well-known/openid-configuration"} {
-		candidate := origin(home) + path
-		r, err := ss.probe(candidate, origin(home))
+	var evidence, invalidEvidence string
+	for _, result := range results {
+		path, candidate, r, err := result.path, result.candidate, result.response, result.err
 		if err != nil {
-			lastErr = err
-			evidence = "OAuth/OIDC metadata was not observed: " + err.Error()
+			if lastErr == nil {
+				lastErr = err
+				evidence = "OAuth/OIDC metadata was not observed: " + err.Error()
+			}
 			continue
 		}
 		if r.code == http.StatusNotFound || r.code == http.StatusGone {
-			evidence = fmt.Sprintf("%s returned HTTP %d", path, r.code)
+			if evidence == "" {
+				evidence = fmt.Sprintf("%s returned HTTP %d", path, r.code)
+			}
 			continue
 		}
 		if r.code != http.StatusOK {
-			evidence = fmt.Sprintf("%s returned HTTP %d", path, r.code)
-			if r.code >= http.StatusInternalServerError {
+			if evidence == "" {
+				evidence = fmt.Sprintf("%s returned HTTP %d", path, r.code)
+			}
+			if r.code >= http.StatusInternalServerError && lastErr == nil {
 				lastErr = fmt.Errorf("server error response")
 				evidence = fmt.Sprintf("OAuth/OIDC metadata was not observed: %s returned HTTP %d", path, r.code)
 			}
@@ -47,22 +75,26 @@ func oauthChecks(ss *session, home *url.URL, page pageResult) []reportmodel.Find
 		}
 		var metadata map[string]any
 		if err := json.Unmarshal(r.body, &metadata); err != nil || metadata == nil {
-			invalid := "OAuth/OIDC metadata response was not a JSON object."
-			findings := oauthFindings(candidate, nil, true, &invalid)
-			return append(findings, oauthResourceFinding(ss, home, true, nil))
+			if invalidEvidence == "" {
+				invalidEvidence = "OAuth/OIDC metadata response was not a JSON object."
+			}
+			continue
 		}
-		findings := oauthFindings(candidate, metadata, true, nil)
-		return append(findings, oauthResourceFinding(ss, home, true, nil))
+		return append(oauthFindings(candidate, metadata, true, nil), resourceFinding)
 	}
 	if lastErr != nil {
 		findings := oauthFindings(origin(home)+"/.well-known/oauth-authorization-server", nil, true, &evidence)
-		return append(findings, oauthResourceFinding(ss, home, true, &evidence))
+		return append(findings, resourceFinding)
+	}
+	if invalidEvidence != "" {
+		findings := oauthFindings(origin(home)+"/.well-known/oauth-authorization-server", nil, true, &invalidEvidence)
+		return append(findings, resourceFinding)
 	}
 	if evidence == "" {
 		evidence = "Authentication links were observed, but no public OAuth/OIDC metadata document was found."
 	}
 	findings := oauthFindings(origin(home)+"/.well-known/oauth-authorization-server", nil, true, &evidence)
-	return append(findings, oauthResourceFinding(ss, home, true, nil))
+	return append(findings, resourceFinding)
 }
 
 func hasAuthSurface(doc *html.Node, home *url.URL) bool {
