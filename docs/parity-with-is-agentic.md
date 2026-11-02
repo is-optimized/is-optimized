@@ -69,7 +69,7 @@ deliberate: an existing related heuristic is not treated as equivalent coverage.
 | HTML and Markdown error routes | `agent.markdown_404` | None | Implemented: unique-path HTML/Markdown GET probes; validates 404/410, Markdown media type, minimum body length, and link syntax, but not link destination. |
 | Refresh/script redirect stubs, chains and host/scheme consistency | `seo.redirect_hygiene` | `seo.page_status` (partial) | Pending; redirect behavior must be observed, not inferred from markup alone. |
 | Open Graph, Twitter card, language and resolved image | `seo.social_metadata` | `seo.canonical` (partial) | Pending; external image fetches need the shared SSRF-safe budget. |
-| About/contact/privacy/terms trust pages | `geo.trust_pages` | `agent.find.docs` (partial) | Pending; probe a fixed bounded path set and score proportional availability/content. |
+| About/contact/privacy/terms trust pages | `geo.trust.*` | `agent.find.docs` (partial) | Implemented partially: probes four same-origin pages and checks 500 visible-text bytes; one standard route per topic, no legal/claim assessment. |
 | Organization identity completeness and sameAs | `geo.organization` | `geo.entity` (partial) | Pending; parse JSON-LD types/fields without asserting truth. |
 | Main-text token estimate and visible-text/HTML ratio | `agent.content_budget`, `geo.content_ratio` | `agent.read.facts` (partial) | Pending; same parser/text extraction with explicit estimate limits. |
 | OpenAPI discovery and operation/schema quality | `agent.openapi.*` | `agent.act.openapi` (discovery only) | Pending; only read-only GET of advertised or standard paths; parser and bounds required. |

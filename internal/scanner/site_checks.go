@@ -11,23 +11,101 @@ import (
 	"strings"
 
 	"github.com/is-optimized/is-optimized/internal/reportmodel"
+	"golang.org/x/net/html"
 )
 
-func siteAgentChecks(ss *session, home *url.URL, homepage response) []reportmodel.Finding {
+func siteAgentChecks(ss *session, home *url.URL, homepage response, homepagePage pageResult) []reportmodel.Finding {
 	if homepage.code == 0 {
 		return []reportmodel.Finding{
 			{ID: "agent.markdown", Pillar: "agent", Title: "Markdown content negotiation", Status: "unknown", Weight: 3, Tier: "essential", URL: origin(home) + "/", Evidence: "Homepage response unavailable; site-level representation was not probed."},
 			{ID: "agent.markdown_404", Pillar: "agent", Title: "Markdown-aware not-found response", Status: "unknown", Weight: 3, Tier: "essential", URL: origin(home), Evidence: "Homepage response unavailable; not-found behavior was not probed."},
 			{ID: "agent.robots", Pillar: "agent", Title: "AI crawler access policy", Status: "unknown", Weight: 3, Tier: "essential", URL: origin(home) + "/robots.txt", Evidence: "Homepage response unavailable; retrieval behavior was not probed."},
+			trustFinding("geo.trust.about", "About page", "/about", "unknown", "Homepage response unavailable; trust-page discovery was not probed."),
+			trustFinding("geo.trust.contact", "Contact page", "/contact", "unknown", "Homepage response unavailable; trust-page discovery was not probed."),
+			trustFinding("geo.trust.privacy", "Privacy page", "/privacy", "unknown", "Homepage response unavailable; trust-page discovery was not probed."),
+			trustFinding("geo.trust.terms", "Terms page", "/terms", "unknown", "Homepage response unavailable; trust-page discovery was not probed."),
 		}
 	}
-	results := make(chan reportmodel.Finding, 3)
+	results := make(chan reportmodel.Finding, 7)
 	go func() { results <- markdownNegotiationCheck(ss, home, homepage) }()
 	go func() { results <- markdownNotFoundCheck(ss, home) }()
 	go func() { results <- aiCrawlerAccessCheck(ss, home, homepage) }()
-	out := []reportmodel.Finding{<-results, <-results, <-results}
+	for _, trust := range trustPageDefinitions() {
+		trust := trust
+		go func() { results <- trustPageCheck(ss, home, homepagePage, trust) }()
+	}
+	out := make([]reportmodel.Finding, 0, 7)
+	for i := 0; i < cap(results); i++ {
+		out = append(out, <-results)
+	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
+}
+
+type trustPageDefinition struct {
+	ID, Title, Route, LinkTerm string
+}
+
+func trustPageDefinitions() []trustPageDefinition {
+	return []trustPageDefinition{
+		{ID: "geo.trust.about", Title: "About page", Route: "/about", LinkTerm: "about"},
+		{ID: "geo.trust.contact", Title: "Contact page", Route: "/contact", LinkTerm: "contact"},
+		{ID: "geo.trust.privacy", Title: "Privacy page", Route: "/privacy", LinkTerm: "privacy"},
+		{ID: "geo.trust.terms", Title: "Terms page", Route: "/terms", LinkTerm: "terms"},
+	}
+}
+
+func trustFinding(id, title, route, status, evidence string) reportmodel.Finding {
+	return reportmodel.Finding{
+		ID: id, Pillar: "geo", Title: title, Status: status, Weight: 1, Tier: "recommended", Stage: "read",
+		URL: route, Evidence: evidence,
+		Applicability: "Assesses whether the site publishes a public first-party trust page; specific legal or business claims are not verified.",
+		Remediation:   "Publish a useful first-party page for this topic and link it from the homepage or footer.",
+	}
+}
+
+func trustPageCheck(ss *session, home *url.URL, homepage pageResult, def trustPageDefinition) reportmodel.Finding {
+	f := trustFinding(def.ID, def.Title, origin(home)+def.Route, "unknown", "Trust-page response was not observed.")
+	if homepage.doc == nil {
+		f.Evidence = "Homepage HTML unavailable; trust-page links were not inspected."
+		return f
+	}
+	probeURL := origin(home) + def.Route
+	var linked string
+	walk(homepage.doc, func(n *html.Node) {
+		if linked != "" || n.Type != html.ElementNode || n.Data != "a" {
+			return
+		}
+		u, ok := readinessLink(attr(n, "href"), home)
+		if ok && origin(u) == origin(home) && strings.Contains(strings.ToLower(u.Path), def.LinkTerm) {
+			linked = u.String()
+		}
+	})
+	if linked != "" {
+		probeURL = linked
+	}
+	r, err := ss.probe(probeURL, origin(home))
+	if err != nil {
+		f.Evidence = "Trust-page fetch was not observed: " + err.Error()
+		return f
+	}
+	f.URL = r.url.String()
+	page := analyze(r, nil, probeURL, 0)
+	visibleBytes := 0
+	if page.doc != nil {
+		visibleBytes = len(initialText(page.doc))
+	}
+	f.Evidence = fmt.Sprintf("%s returned HTTP %d with %d visible-text bytes%s", def.Title, r.code, visibleBytes, map[bool]string{true: "; linked from homepage", false: "; standard path probed"}[linked != ""])
+	if r.code != http.StatusOK || page.doc == nil {
+		f.Status = "fail"
+	} else if visibleBytes >= 500 {
+		f.Status = "pass"
+	} else if visibleBytes > 0 {
+		f.Status = "partial"
+	} else {
+		f.Status = "fail"
+	}
+	return f
 }
 
 func aiCrawlerAccessCheck(ss *session, home *url.URL, homepage response) reportmodel.Finding {
@@ -64,31 +142,35 @@ func aiCrawlerAccessCheck(ss *session, home *url.URL, homepage response) reportm
 			results <- result{ua: ua, allowed: allowed, specified: specified, resp: r, err: err}
 		}(ua)
 	}
-	var lines []string
+	var observed []result
 	blocked := false
 	unobserved := false
 	for range retrieval {
-		r := <-results
+		observed = append(observed, <-results)
+	}
+	sort.Slice(observed, func(i, j int) bool { return observed[i].ua < observed[j].ua })
+	var robotMatrix, liveMatrix []string
+	for _, r := range observed {
 		if r.specified {
 			state := "allowed"
 			if !r.allowed {
 				state = "blocked"
 				blocked = true
 			}
-			lines = append(lines, fmt.Sprintf("robots %s: %s", r.ua, state))
+			robotMatrix = append(robotMatrix, fmt.Sprintf("%s=%s", r.ua, state))
 		} else {
-			lines = append(lines, fmt.Sprintf("robots %s: unspecified (allowed by default)", r.ua))
+			robotMatrix = append(robotMatrix, fmt.Sprintf("%s=unspecified", r.ua))
 		}
 		if r.err != nil {
 			unobserved = true
-			lines = append(lines, fmt.Sprintf("live %s: unobserved (%s)", r.ua, r.err.Error()))
+			liveMatrix = append(liveMatrix, r.ua+"=unobserved")
 			continue
 		}
 		ratio := 0.0
 		if len(homepage.body) > 0 {
 			ratio = float64(len(r.resp.body)) / float64(len(homepage.body))
 		}
-		lines = append(lines, fmt.Sprintf("live %s: HTTP %d, %d%% of browser response bytes", r.ua, r.resp.code, int(ratio*100)))
+		liveMatrix = append(liveMatrix, fmt.Sprintf("%s=%d/%d%%", r.ua, r.resp.code, int(ratio*100)))
 		if r.resp.code == http.StatusForbidden || r.resp.code == http.StatusUnauthorized || challengeBody(r.resp.body) {
 			blocked = true
 		}
@@ -96,14 +178,17 @@ func aiCrawlerAccessCheck(ss *session, home *url.URL, homepage response) reportm
 			unobserved = true
 		}
 	}
+	var lines []string
+	if len(policy.rules.contentSignals) > 0 {
+		lines = append(lines, "Content-Signal="+strings.Join(policy.rules.contentSignals, ";"))
+	} else {
+		lines = append(lines, "Content-Signal=not observed")
+	}
 	if !policy.present {
 		lines = append(lines, "robots.txt has no rules: everything is allowed by default")
 	}
-	if len(policy.rules.contentSignals) > 0 {
-		lines = append(lines, "Content-Signal: "+strings.Join(policy.rules.contentSignals, "; "))
-	} else {
-		lines = append(lines, "No Content-Signal directive observed")
-	}
+	lines = append(lines, "robots retrieval "+strings.Join(robotMatrix, ","))
+	lines = append(lines, "live GET "+strings.Join(liveMatrix, ","))
 	training := []string{"GPTBot", "ClaudeBot", "anthropic-ai", "Google-Extended", "Applebot-Extended", "CCBot", "Bytespider", "meta-externalagent"}
 	var trainingMatrix []string
 	for _, ua := range training {
@@ -117,8 +202,8 @@ func aiCrawlerAccessCheck(ss *session, home *url.URL, homepage response) reportm
 		}
 		trainingMatrix = append(trainingMatrix, ua+"="+state)
 	}
-	lines = append(lines, "Training-bot policy (informational): "+strings.Join(trainingMatrix, ", "))
-	f.Evidence = excerpt(strings.Join(lines, "; "))
+	lines = append(lines, "training (informational) "+strings.Join(trainingMatrix, ","))
+	f.Evidence = excerptLimit(strings.Join(lines, "; "), 600)
 	if blocked {
 		f.Status = "fail"
 	} else if unobserved {

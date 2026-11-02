@@ -139,8 +139,11 @@ func TestScanPageCapAndConcurrencyBound(t *testing.T) {
 
 func TestScanSamplesDeclaredSitemapAndSecondHop(t *testing.T) {
 	var requests []string
+	var requestsMu sync.Mutex
 	s := fixtureScanner(func(r *http.Request) (*http.Response, error) {
+		requestsMu.Lock()
 		requests = append(requests, r.URL.Path)
+		requestsMu.Unlock()
 		switch r.URL.Path {
 		case "/robots.txt":
 			return reply(r, 200, "User-agent: *\nSitemap: https://example.com/sitemap.xml\n", "text/plain"), nil
@@ -170,8 +173,11 @@ func TestScanSamplesDeclaredSitemapAndSecondHop(t *testing.T) {
 	if !seen["/from-sitemap"] || !seen["/second-hop"] {
 		t.Fatalf("sitemap or second-hop page missing from sample: %#v", seen)
 	}
-	if !containsString(requests, "/sitemap.xml") {
-		t.Fatalf("declared sitemap not fetched: %#v", requests)
+	requestsMu.Lock()
+	observedRequests := append([]string(nil), requests...)
+	requestsMu.Unlock()
+	if !containsString(observedRequests, "/sitemap.xml") {
+		t.Fatalf("declared sitemap not fetched: %#v", observedRequests)
 	}
 }
 
@@ -383,7 +389,7 @@ func TestMarkdownNegotiationAndAgent404Checks(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			s := fixtureScanner(func(r *http.Request) (*http.Response, error) {
 				if r.URL.Path == "/" && r.Header.Get("Accept") == "text/markdown" {
-					v := reply(r, http.StatusOK, "# Example\n\nBody", "text/markdown")
+					v := reply(r, http.StatusOK, tt.markdownBody, tt.markdownType)
 					if tt.vary != "" {
 						v.Header.Set("Vary", tt.vary)
 					}
@@ -398,7 +404,7 @@ func TestMarkdownNegotiationAndAgent404Checks(t *testing.T) {
 				return reply(r, http.StatusNotFound, "", "text/plain"), nil
 			})
 			ss := &session{s: s, ctx: context.Background(), policies: map[string]policy{}}
-			checks := siteAgentChecks(ss, homeURL, home)
+			checks := siteAgentChecks(ss, homeURL, home, readinessPage(t, `<html><body><main>Example text</main></body></html>`))
 			got := map[string]string{}
 			for _, f := range checks {
 				got[f.ID] = f.Status
@@ -451,6 +457,39 @@ func TestAICrawlerAccessUsesRobotsPolicyAndRetrievalResponses(t *testing.T) {
 			}
 			if !strings.Contains(got.Evidence, "Content-Signal") {
 				t.Fatalf("Content-Signal evidence missing: %s", got.Evidence)
+			}
+		})
+	}
+}
+
+func TestTrustPageFindingsUseStatusAndVisibleText(t *testing.T) {
+	home, _ := url.Parse("https://example.com/")
+	def := trustPageDefinitions()[0]
+	for _, tc := range []struct {
+		name, body string
+		status     int
+		fetchErr   bool
+		want       string
+	}{
+		{name: "complete", body: strings.Repeat("Useful visible company information. ", 20), status: http.StatusOK, want: "pass"},
+		{name: "short page", body: "Short but visible.", status: http.StatusOK, want: "partial"},
+		{name: "missing", body: "Not found", status: http.StatusNotFound, want: "fail"},
+		{name: "unobserved", fetchErr: true, want: "unknown"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := fixtureScanner(func(r *http.Request) (*http.Response, error) {
+				if tc.fetchErr {
+					return nil, errors.New("fixture unavailable")
+				}
+				return reply(r, tc.status, "<html><body><main>"+tc.body+"</main></body></html>", "text/html"), nil
+			})
+			ss := &session{s: s, ctx: context.Background(), policies: map[string]policy{origin(home): {rules: robots{groups: []robotGroup{{agents: []string{"*"}, rules: []robotRule{{path: "/", allow: true}}}}}}}}
+			got := trustPageCheck(ss, home, readinessPage(t, `<main><a href="/about">About</a></main>`), def)
+			if got.Status != tc.want {
+				t.Fatalf("status=%q want %q evidence=%s", got.Status, tc.want, got.Evidence)
+			}
+			if got.Tier != "recommended" || got.Weight != 1 {
+				t.Fatalf("unexpected scoring metadata: %+v", got)
 			}
 		})
 	}

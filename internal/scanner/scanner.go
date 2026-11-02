@@ -300,7 +300,8 @@ func (s *Scanner) Scan(ctx context.Context, domain string) (reportmodel.Report, 
 	if home.url != nil {
 		homeURL = home.url
 	}
-	report.Findings = append(report.Findings, siteAgentChecks(ss, homeURL, home)...)
+	siteChecks := make(chan []reportmodel.Finding, 1)
+	go func() { siteChecks <- siteAgentChecks(ss, homeURL, home, pages[0]) }()
 	sitemapEvidence := "Not inspected"
 	if fetchErr == nil && pages[0].page.Error == "" {
 		links := selectLinks(pages[0].doc, home.url)
@@ -349,6 +350,7 @@ func (s *Scanner) Scan(ctx context.Context, domain string) (reportmodel.Report, 
 		report.Pages = append(report.Pages, p.page)
 		report.Findings = append(report.Findings, evaluate(p)...)
 	}
+	report.Findings = append(report.Findings, <-siteChecks...)
 	report.Findings = markDuplicates(report.Findings, pages)
 	annotateReadiness(report.Findings)
 	report.Pillars = score(report.Findings)
@@ -428,10 +430,14 @@ func htmlType(s string) bool {
 	return err == nil && (t == "text/html" || t == "application/xhtml+xml")
 }
 func excerpt(s string) string {
+	return excerptLimit(s, 300)
+}
+
+func excerptLimit(s string, limit int) string {
 	s = strings.Join(strings.Fields(s), " ")
 	r := []rune(s)
-	if len(r) > 300 {
-		return string(r[:300]) + "…"
+	if len(r) > limit {
+		return string(r[:limit]) + "…"
 	}
 	return s
 }
