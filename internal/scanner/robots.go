@@ -18,8 +18,9 @@ type robotGroup struct {
 	rules  []robotRule
 }
 type robots struct {
-	groups   []robotGroup
-	sitemaps []string
+	groups         []robotGroup
+	sitemaps       []string
+	contentSignals []string
 }
 
 func parseRobots(body string) (robots, error) {
@@ -74,6 +75,9 @@ func parseRobots(body string) (robots, error) {
 		case "sitemap":
 			recognized = true
 			r.sitemaps = append(r.sitemaps, val)
+		case "content-signal":
+			recognized = true
+			r.contentSignals = append(r.contentSignals, val)
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -86,6 +90,11 @@ func parseRobots(body string) (robots, error) {
 	return r, nil
 }
 func (r robots) allowed(path string) bool {
+	allowed, _ := r.decision(userAgent, path)
+	return allowed
+}
+
+func (r robots) decision(agent, path string) (bool, bool) {
 	bestAgent := -1
 	var selected []robotRule
 	for _, g := range r.groups {
@@ -94,7 +103,7 @@ func (r robots) allowed(path string) bool {
 			if a == "*" && rank < 0 {
 				rank = 0
 			}
-			if a != "*" && strings.Contains(strings.ToLower(userAgent), a) && len(a) > rank {
+			if a != "*" && strings.Contains(strings.ToLower(agent), a) && len(a) > rank {
 				rank = len(a)
 			}
 		}
@@ -108,6 +117,7 @@ func (r robots) allowed(path string) bool {
 	}
 	longest := -1
 	allow := true
+	pathSpecified := false
 	for _, rule := range selected {
 		p := rule.path
 		end := strings.HasSuffix(p, "$")
@@ -124,10 +134,13 @@ func (r robots) allowed(path string) bool {
 		}
 		matched, _ := regexp.MatchString(pattern, path)
 		weight := len(strings.ReplaceAll(p, "*", ""))
-		if matched && (weight > longest || (weight == longest && rule.allow)) {
-			longest = weight
-			allow = rule.allow
+		if matched {
+			pathSpecified = true
+			if weight > longest || (weight == longest && rule.allow) {
+				longest = weight
+				allow = rule.allow
+			}
 		}
 	}
-	return allow
+	return allow, pathSpecified
 }

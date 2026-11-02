@@ -42,8 +42,10 @@ func New() *Scanner {
 }
 
 type policy struct {
-	rules robots
-	err   error
+	rules   robots
+	err     error
+	present bool
+	status  int
 }
 type session struct {
 	s                          *Scanner
@@ -240,9 +242,13 @@ func (ss *session) getPolicy(u *url.URL) policy {
 		case e != nil:
 			p.err = errors.New("robots policy unavailable")
 		case r.code == 404 || r.code == 410: // absent policy permits crawling
+			p.status = r.code
 		case r.code != 200:
+			p.status = r.code
 			p.err = errors.New("robots policy unavailable")
 		default:
+			p.present = true
+			p.status = r.code
 			p.rules, p.err = parseRobots(string(r.body))
 		}
 	}
@@ -264,6 +270,14 @@ func (ss *session) probeAccept(raw, site, accept string) (response, error) {
 	}
 	headers := make(http.Header)
 	headers.Set("Accept", accept)
+	return ss.fetchWithHeaders(raw, true, site, headers)
+}
+
+func (ss *session) probeHeaders(raw, site string, headers http.Header) (response, error) {
+	if ss.discovery.Add(1) > maxDiscoveryCount {
+		ss.discoveryBudgetExhaustions.Add(1)
+		return response{}, errors.New("discovery budget exhausted")
+	}
 	return ss.fetchWithHeaders(raw, false, site, headers)
 }
 func (s *Scanner) Scan(ctx context.Context, domain string) (reportmodel.Report, error) {

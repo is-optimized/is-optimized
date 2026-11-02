@@ -243,6 +243,40 @@ func TestRobotsMatching(t *testing.T) {
 		t.Fatal("HTML accepted as robots")
 	}
 }
+
+func TestRobotsContentSignalsAndAIAgentDecisions(t *testing.T) {
+	r, err := parseRobots("User-agent: *\nDisallow: /private\nContent-Signal: search=yes, ai-train=no\nUser-agent: ChatGPT-User\nAllow: /\nUser-agent: GPTBot\nDisallow: /\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.contentSignals) != 1 || r.contentSignals[0] != "search=yes, ai-train=no" {
+		t.Fatalf("content signals not retained: %#v", r.contentSignals)
+	}
+	for _, tc := range []struct {
+		agent string
+		path  string
+		allow bool
+	}{
+		{"ChatGPT-User", "/", true},
+		{"Claude-User", "/", true},
+		{"Claude-User", "/private/page", false},
+		{"GPTBot", "/", false},
+		{"UnknownBot", "/", true},
+	} {
+		got, _ := r.decision(tc.agent, tc.path)
+		if got != tc.allow {
+			t.Errorf("%s %s allowed=%t want %t", tc.agent, tc.path, got, tc.allow)
+		}
+	}
+	comments, err := parseRobots("# no rules\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	allowed, specified := comments.decision("PerplexityBot", "/")
+	if !allowed || specified {
+		t.Fatalf("empty policy must report unspecified and allow by default: allowed=%t specified=%t", allowed, specified)
+	}
+}
 func TestPublicAddressValidation(t *testing.T) {
 	for _, raw := range []string{"127.0.0.1", "10.0.0.1", "169.254.169.254", "100.64.0.1", "192.0.2.1", "::1", "::ffff:8.8.8.8", "fc00::1", "2001:db8::1", "64:ff9b::a00:1", "2002:a00:1::"} {
 		if publicIP(netip.MustParseAddr(raw)) {
@@ -382,6 +416,46 @@ func TestMarkdownNegotiationAndAgent404Checks(t *testing.T) {
 	}
 }
 
+func TestAICrawlerAccessUsesRobotsPolicyAndRetrievalResponses(t *testing.T) {
+	homeURL, _ := url.Parse("https://example.com/")
+	homepage := response{url: homeURL, code: http.StatusOK, body: []byte(strings.Repeat("x", 100)), contentType: "text/html"}
+	for _, tc := range []struct {
+		name, robots string
+		status       int
+		want         string
+	}{
+		{name: "allowed retrieval", robots: "User-agent: *\nAllow: /\nContent-Signal: search=yes, ai-train=no\n", status: http.StatusOK, want: "pass"},
+		{name: "blocked retrieval", robots: "User-agent: *\nAllow: /\nUser-agent: Claude-User\nDisallow: /\n", status: http.StatusOK, want: "fail"},
+		{name: "challenge response", robots: "User-agent: *\nAllow: /\n", status: http.StatusForbidden, want: "fail"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			parsed, err := parseRobots(tc.robots)
+			if err != nil {
+				t.Fatal(err)
+			}
+			s := fixtureScanner(func(r *http.Request) (*http.Response, error) {
+				if r.Method != http.MethodGet {
+					t.Errorf("unexpected request method %s", r.Method)
+				}
+				status := tc.status
+				body := strings.Repeat("y", 80)
+				if status == http.StatusForbidden {
+					body = "captcha challenge-platform"
+				}
+				return reply(r, status, body, "text/html"), nil
+			})
+			ss := &session{s: s, ctx: context.Background(), policies: map[string]policy{origin(homeURL): {rules: parsed, present: true, status: http.StatusOK}}}
+			got := aiCrawlerAccessCheck(ss, homeURL, homepage)
+			if got.Status != tc.want {
+				t.Fatalf("status=%q want %q evidence=%s", got.Status, tc.want, got.Evidence)
+			}
+			if !strings.Contains(got.Evidence, "Content-Signal") {
+				t.Fatalf("Content-Signal evidence missing: %s", got.Evidence)
+			}
+		})
+	}
+}
+
 func TestRedirectPrivateRejectedBeforeTransport(t *testing.T) {
 	calls := 0
 	s := fixtureScanner(func(r *http.Request) (*http.Response, error) {
@@ -438,7 +512,7 @@ func TestDiscoveryLimited(t *testing.T) {
 	ss := &session{s: s, ctx: context.Background(), policies: map[string]policy{}}
 	u, _ := url.Parse("https://example.com/")
 	ss.getPolicy(u)
-	for i := 0; i < 7; i++ {
+	for i := 0; i < maxDiscoveryCount-1; i++ {
 		if _, e := ss.probe("https://example.com/llms.txt", origin(u)); e != nil {
 			t.Fatal(e)
 		}

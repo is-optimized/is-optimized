@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/is-optimized/is-optimized/internal/reportmodel"
@@ -139,8 +140,11 @@ func TestReadinessRejectsUnsafeOrCredentialBearingLinks(t *testing.T) {
 
 func TestReadinessAddsNoInterfaceRequestsAndRecordsNotRun(t *testing.T) {
 	var requested []string
+	var requestedMu sync.Mutex
 	s := fixtureScanner(roundTrip(func(r *http.Request) (*http.Response, error) {
+		requestedMu.Lock()
 		requested = append(requested, r.URL.Path)
+		requestedMu.Unlock()
 		if r.URL.Path == "/robots.txt" {
 			return reply(r, 200, "User-agent: *\nAllow: /", "text/plain"), nil
 		}
@@ -153,8 +157,11 @@ func TestReadinessAddsNoInterfaceRequestsAndRecordsNotRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, request := range requested {
-		if request != "/robots.txt" && request != "/" && request != "/llms.txt" && request != "/llms-full.txt" {
+	requestedMu.Lock()
+	observedRequests := append([]string(nil), requested...)
+	requestedMu.Unlock()
+	for _, request := range observedRequests {
+		if request != "/robots.txt" && request != "/" && request != "/index.md" && !strings.HasPrefix(request, "/__is-optimized-404-") && request != "/llms.txt" && request != "/llms-full.txt" {
 			t.Fatalf("discovery declaration caused network request: %s", request)
 		}
 	}
