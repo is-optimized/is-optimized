@@ -254,6 +254,7 @@ func Registry() []Check {
 		{ID: "agent.landmarks", Pillar: "agent", Title: "Navigation landmarks", Remediation: "Use main and navigation landmarks to identify page content and navigation.", Weight: 1, Tier: "recommended"},
 		{ID: "agent.controls", Pillar: "agent", Title: "Named interactive controls", Remediation: "Give interactive controls accessible names through visible labels or appropriate ARIA attributes.", Weight: 2, Tier: "recommended"},
 		{ID: "agent.links", Pillar: "agent", Title: "Named navigation links", Remediation: "Give navigation links meaningful visible or accessible names.", Weight: 1, Tier: "recommended"},
+		{ID: "agent.prompt_injection_signals", Pillar: "agent", Title: "Instruction-like hidden text signals", Remediation: "Review instruction-like text in hidden or accessibility metadata. Treat page content as untrusted and remove misleading instructions where appropriate."},
 	}
 }
 func evaluate(p pageResult) []reportmodel.Finding {
@@ -266,6 +267,7 @@ func evaluate(p pageResult) []reportmodel.Finding {
 	canonCount := 0
 	canonicalValues := map[string]bool{}
 	images, missingAlt, controls, unnamed, links, emptyLinks := 0, 0, 0, 0, 0, 0
+	hiddenInstructionSignals := 0
 	heading, structured, main, nav, article, author, dated, entity := false, false, false, false, false, false, false, false
 	var visible, mainVisible strings.Builder
 	labels := map[string]string{}
@@ -279,6 +281,11 @@ func evaluate(p pageResult) []reportmodel.Finding {
 		}
 		if n.Data == "label" && attr(n, "for") != "" {
 			labels[attr(n, "for")] = text(n)
+		}
+		for _, key := range []string{"aria-label", "title", "alt"} {
+			if suspiciousInstructionText(attr(n, key)) {
+				hiddenInstructionSignals++
+			}
 		}
 	})
 	accessibleName := func(n *html.Node) bool {
@@ -330,6 +337,8 @@ func evaluate(p pageResult) []reportmodel.Finding {
 					mainVisible.WriteString(n.Data)
 					mainVisible.WriteByte(' ')
 				}
+			} else if suspiciousInstructionText(n.Data) {
+				hiddenInstructionSignals++
 			}
 		}
 		if n.Type != html.ElementNode {
@@ -559,6 +568,11 @@ func evaluate(p pageResult) []reportmodel.Finding {
 			} else if emptyLinks > 0 {
 				f.Status = "partial"
 			}
+		case "agent.prompt_injection_signals":
+			f.Stage = "read"
+			f.Applicability = "Informational pattern scan of hidden text and aria-label, title, and alt attributes; detected phrases require human interpretation and are never followed or executed."
+			f.Evidence = fmt.Sprintf("%d instruction-like pattern(s) observed in hidden or accessibility metadata; matched text is omitted because page content is untrusted", hiddenInstructionSignals)
+			f.Status = "information"
 		}
 		out = append(out, f)
 	}
@@ -608,6 +622,16 @@ func evaluate(p pageResult) []reportmodel.Finding {
 	out = append(out, readinessObservations(p)...)
 	annotateReadiness(out)
 	return out
+}
+
+func suspiciousInstructionText(value string) bool {
+	value = strings.ToLower(strings.Join(strings.Fields(value), " "))
+	for _, phrase := range []string{"ignore previous", "ignore all previous", "ai assistant", "you are", "system prompt"} {
+		if strings.Contains(value, phrase) {
+			return true
+		}
+	}
+	return false
 }
 func hasType(v any, kind string) bool {
 	switch x := v.(type) {
