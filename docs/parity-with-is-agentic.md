@@ -24,7 +24,7 @@ metadata, unless the evidence row says otherwise.
 | Image alternatives | `seo.images` | Weighted; alt presence heuristic, not image understanding. |
 | Structured entity data | `geo.entity` | Weighted JSON-LD presence/type heuristic, not full schema validation or business truth. |
 | Semantic structure | `geo.structure` | Weighted heading/list/table signals. |
-| Article attribution | `geo.author` | Weighted heuristic. Prompt identifies false positives from `<article>`; validate/fix this before widening scoring. |
+| Article attribution | `geo.author` | Weighted; applicability now requires Article/BlogPosting/NewsArticle JSON-LD or `og:type=article`; an HTML `<article>` wrapper alone is not enough. |
 | Navigation landmarks | `agent.landmarks` | Weighted `main`/`nav` presence heuristic. |
 | Named controls and links | `agent.controls`, `agent.links` | Weighted accessible-name heuristics; no browser accessibility tree. |
 | Sitemap declaration | `seo.sitemap` | Informational sitemap discovery evidence; sitemap quality and freshness scoring are not implemented. |
@@ -83,6 +83,7 @@ defensible specification references. Scanned content remains untrusted input.
 
 ## Verification still required
 
+- Initial implementation section: correct the `geo.author` applicability false positive. Fixture coverage was added for an HTML-only `<article>` container, `og:type=article`, BlogPosting JSON-LD, and a NewsArticle JSON-LD graph. Source and fixture are committed in the next checkpoint; CI and live-site checks remain pending.
 - Capture the complete check inventory and baseline scores from the seven
   public reports plus fresh `npx is-agentic` output for the requested sites.
 - Add one matrix row per externally reported check and resolve every unmapped

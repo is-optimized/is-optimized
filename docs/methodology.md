@@ -1,6 +1,6 @@
 # MVP methodology and provenance
 
-This document records the independently implemented MVP check registry. It does not claim parity with the hosted Is Agentic service. The source of executable behavior is the registries and evaluation in `internal/scanner/checks.go` and `internal/scanner/readiness.go`. Current reports identify methodology `2026-10-agentready-v3` and selection policy `home-links-sitemap-two-hop-v2`; v1 and v2 reports retain the versions under which they were produced.
+This document records the independently implemented MVP check registry and subsequent parity work. It does not claim parity with the hosted Is Agentic service. The source of executable behavior is the registries and evaluation in `internal/scanner/checks.go` and `internal/scanner/readiness.go`. New reports identify methodology `2026-11-agentready-v1` and selection policy `home-links-sitemap-two-hop-v2`; prior reports retain the versions under which they were produced.
 
 ## Reference provenance
 
@@ -32,7 +32,7 @@ Each check runs against every selected content page. The pillar score aggregates
 | `geo.access` | 3 | Foundational. Pass for usable HTTP 200 HTML; otherwise unknown. | Establishes observable public content only. |
 | `geo.entity` | 2 | Pass for recognized entity types in parseable JSON-LD; partial otherwise. | Recognizes common entity types, not truth, authority, or complete Schema.org validity. |
 | `geo.structure` | 2 | Pass for headings and semantic lists/tables/definitions; partial for headings alone; fail without meaningful headings. | Measures extractable organization, not citation probability. |
-| `geo.author` | 1 | Applies when article markup is detected. Pass for author metadata plus datetime; partial otherwise. | Current implementation recognizes HTML author metadata and time elements, not every attribution convention. |
+| `geo.author` | 1 | Applies when Article, BlogPosting, or NewsArticle JSON-LD or `og:type=article` is observed. Pass for author metadata plus datetime; partial otherwise. | An HTML `<article>` container alone does not establish editorial attribution; the check still does not recognize every attribution convention. |
 | `agent.access` | 3 | Foundational. Pass for at least 20 initial-HTML words; fail below that, unknown if page unavailable. | A coarse app-shell heuristic. Hidden text, visual rendering and actual tasks are not verified. |
 | `agent.landmarks` | 1 | Pass with main and nav elements; partial otherwise. | Initial implementation checks native landmarks, not every equivalent ARIA role. |
 | `agent.controls` | 2 | Not applicable without controls; pass for names on all controls; partial otherwise. | Observes common label and ARIA mechanisms; does not execute interactions or claim a complete accessibility audit. |
@@ -64,7 +64,7 @@ Existing title and description checks become partial for equal complete values a
 
 Canonical checks recognize tokenized rel values, flag absent, multiple or malformed absolute HTTP(S) references, and explain a different canonical destination without penalizing it solely for differing from the fetched URL. Targets are not fetched and intentional consolidation is not treated as a defect. HTTP Link-header canonicals are not evaluated.
 
-Zero-weight findings expose sampled-page outcomes, initial-HTML word counts, and HSTS header presence. Requested and final URLs distinguish completed redirects. Unknown fetch outcomes remain distinct from observed HTTP statuses. Word counts exclude head/script/style text but do not establish visible word counts or content quality. HSTS presence is a security observation, not validated transport-policy configuration or an SEO score input. The later v3 release expands page selection and adds observed HTML response timing; that value is not browser load time or Core Web Vitals. HTML and PDF show these findings from the same saved evidence.
+Zero-weight findings expose sampled-page outcomes, initial-HTML word counts, and HSTS header presence. Requested and final URLs distinguish completed redirects. Unknown fetch outcomes remain distinct from observed HTTP statuses. Word counts exclude head/script/style text but do not establish visible word counts or content quality. HSTS presence is a security observation, not validated transport-policy configuration or an SEO score input. The October v3 release expanded page selection and added observed HTML response timing; that value is not browser load time or Core Web Vitals. HTML and PDF show these findings from the same saved evidence.
 
 New fixture tests in `observations_test.go` passed on 2026-10-28 after an explicitly authorized retry passed shared-Mac admission. The complete `go test -race -p 1 ./...` suite and `go vet -p 1 ./...` also passed. These are synthetic/local execution results, not Nanos, provider, or production qualification.
 
