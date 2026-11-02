@@ -61,6 +61,39 @@ func TestRenderImmutableEvidence(t *testing.T) {
 	}
 }
 
+func TestAgentReadinessSummaryRendersFromSavedReport(t *testing.T) {
+	score := 72.5
+	r := designFixture()
+	r.Pillars = append(r.Pillars, reportmodel.Pillar{ID: "agent_readiness", Name: "Agent readiness", Score: &score, Coverage: .92})
+	r.AgentReadiness = &reportmodel.AgentReadinessSummary{
+		ScoreLabel:      "Important blockers remain",
+		Coverage:        .92,
+		Essential:       reportmodel.ReadinessTierSummary{Earned: 56, Available: 80, Passing: 7, Total: 10},
+		Recommended:     reportmodel.ReadinessTierSummary{Earned: 16.5, Available: 20, Passing: 8, Total: 10},
+		BonusPoints:     0,
+		PositiveSignals: 0,
+	}
+	r.Findings = append(r.Findings, reportmodel.Finding{ID: "agent.md", Pillar: "agent_readiness", Tier: "essential", Weight: 4, Status: "partial", Title: "Markdown response", Evidence: "Fixture has HTML only", Remediation: "Return markdown when requested."})
+
+	var html bytes.Buffer
+	if err := HTML(&html, r); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"Agent readiness", "Important blockers remain", "Essential 56.0/80", "Recommended 16.5/20", "92%"} {
+		if !strings.Contains(html.String(), expected) {
+			t.Fatalf("HTML missing %q", expected)
+		}
+	}
+	pdf, err := PDF(r)
+	if err != nil || !bytes.HasPrefix(pdf, []byte("%PDF-")) {
+		t.Fatalf("PDF summary generation failed: %v", err)
+	}
+	encoded, err := json.Marshal(r)
+	if err != nil || !bytes.Contains(encoded, []byte(`"agent_readiness"`)) || !bytes.Contains(encoded, []byte(`"readiness_tier":"essential"`)) {
+		t.Fatalf("JSON report omitted agent readiness: %s (%v)", encoded, err)
+	}
+}
+
 func TestFetchTimingUsesSuccessfulHTMLOnly(t *testing.T) {
 	got := fetchTiming([]reportmodel.Page{
 		{StatusCode: 200, DurationMS: 100},

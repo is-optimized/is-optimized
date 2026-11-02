@@ -59,6 +59,7 @@ type pillarSummary struct {
 }
 type reportSummary struct {
 	Pillars             []pillarSummary
+	AgentReadiness      *reportmodel.AgentReadinessSummary
 	Counts              findingCounts
 	Fixes               []reportmodel.Finding
 	Narrative           string
@@ -102,7 +103,7 @@ func formatDuration(ms int64) string {
 }
 
 func summarize(r reportmodel.Report) reportSummary {
-	v := reportSummary{Selected: len(r.Pages), Fetch: fetchTiming(r.Pages)}
+	v := reportSummary{Selected: len(r.Pages), Fetch: fetchTiming(r.Pages), AgentReadiness: r.AgentReadiness}
 	definitions := []pillarSummary{
 		{ID: "seo", Name: "Search engine readiness", Short: "SEO", Question: "Can search engines read the essentials?", Missing: true},
 		{ID: "geo", Name: "Generative search readiness", Short: "GEO", Question: "Is your information clear and attributable?", Missing: true},
@@ -117,7 +118,13 @@ func summarize(r reportmodel.Report) reportSummary {
 		if !ok {
 			i = len(definitions)
 			positions[p.ID] = i
-			definitions = append(definitions, pillarSummary{ID: p.ID, Name: p.Name, Short: p.ID, Question: p.Name})
+			short := p.ID
+			question := p.Name
+			if p.ID == "agent_readiness" {
+				short = "Agent"
+				question = "Can agents find, read, and act safely?"
+			}
+			definitions = append(definitions, pillarSummary{ID: p.ID, Name: p.Name, Short: short, Question: question})
 		}
 		definitions[i].Score = p.Score
 		definitions[i].Coverage = p.Coverage
@@ -136,6 +143,12 @@ func summarize(r reportmodel.Report) reportSummary {
 		}
 		definitions[i].Findings = append(definitions[i].Findings, f)
 		definitions[i].Counts.add(f.Status)
+		if f.Tier != "" && f.Pillar != "agent_readiness" {
+			if readinessIndex, exists := positions["agent_readiness"]; exists {
+				definitions[readinessIndex].Findings = append(definitions[readinessIndex].Findings, f)
+				definitions[readinessIndex].Counts.add(f.Status)
+			}
+		}
 	}
 	// Status is the priority, not a claim of business impact. Within each status,
 	// foundational checks are first; ties retain the saved evidence order.

@@ -229,28 +229,29 @@ type Check struct {
 	ID, Pillar, Title, Remediation string
 	Weight                         float64
 	Foundational                   bool
+	Tier                           string
 }
 
 // Registry is the complete MVP weighted check set. Applicability and evaluation
 // are encoded below; changes require a new MethodologyVersion.
 func Registry() []Check {
 	return []Check{
-		{"seo.access", "seo", "Public HTML response", "Ensure intended public pages return useful HTML with a successful HTTP status.", 3, true},
-		{"seo.index", "seo", "Index directives", "Review robots directives against your intended indexing policy; remove unintended noindex directives.", 2, false},
-		{"seo.title", "seo", "Page title", "Give this page a concise, descriptive title that distinguishes its purpose.", 2, false},
-		{"seo.description", "seo", "Search description", "Write an accurate page-specific meta description; do not promise that search engines will display it.", 1, false},
-		{"seo.canonical", "seo", "Canonical reference", "Provide one valid canonical URL that reflects the intended public version of this page.", 1, false},
-		{"seo.headings", "seo", "Heading structure", "Provide a meaningful H1 and use heading levels in a logical sequence.", 1, false},
-		{"seo.viewport", "seo", "Mobile viewport declaration", "Declare a viewport with width=device-width; verify actual mobile layout separately.", 1, false},
-		{"seo.images", "seo", "Image text alternatives", "Provide useful alternatives for informative images and empty alt attributes for decorative images.", 1, false},
-		{"geo.access", "geo", "Extractable public response", "Expose intended public information in server-delivered HTML.", 3, true},
-		{"geo.entity", "geo", "Structured entity data", "Add accurate, applicable Schema.org JSON-LD based on verified business or content facts.", 2, false},
-		{"geo.structure", "geo", "Structured information", "Use meaningful headings and semantic lists, tables, or definition lists where they clarify the content.", 2, false},
-		{"geo.author", "geo", "Article attribution", "For article content, identify the author and publish or update date accurately.", 1, false},
-		{"agent.access", "agent", "Initial HTML readability", "Serve meaningful public text in initial HTML so readers need not execute JavaScript to understand the page.", 3, true},
-		{"agent.landmarks", "agent", "Navigation landmarks", "Use main and navigation landmarks to identify page content and navigation.", 1, false},
-		{"agent.controls", "agent", "Named interactive controls", "Give interactive controls accessible names through visible labels or appropriate ARIA attributes.", 2, false},
-		{"agent.links", "agent", "Named navigation links", "Give navigation links meaningful visible or accessible names.", 1, false},
+		{ID: "seo.access", Pillar: "seo", Title: "Public HTML response", Remediation: "Ensure intended public pages return useful HTML with a successful HTTP status.", Weight: 3, Foundational: true, Tier: "essential"},
+		{ID: "seo.index", Pillar: "seo", Title: "Index directives", Remediation: "Review robots directives against your intended indexing policy; remove unintended noindex directives.", Weight: 2, Tier: "recommended"},
+		{ID: "seo.title", Pillar: "seo", Title: "Page title", Remediation: "Give this page a concise, descriptive title that distinguishes its purpose.", Weight: 2, Tier: "recommended"},
+		{ID: "seo.description", Pillar: "seo", Title: "Search description", Remediation: "Write an accurate page-specific meta description; do not promise that search engines will display it.", Weight: 1, Tier: "recommended"},
+		{ID: "seo.canonical", Pillar: "seo", Title: "Canonical reference", Remediation: "Provide one valid canonical URL that reflects the intended public version of this page.", Weight: 1, Tier: "recommended"},
+		{ID: "seo.headings", Pillar: "seo", Title: "Heading structure", Remediation: "Provide a meaningful H1 and use heading levels in a logical sequence.", Weight: 1, Tier: "recommended"},
+		{ID: "seo.viewport", Pillar: "seo", Title: "Mobile viewport declaration", Remediation: "Declare a viewport with width=device-width; verify actual mobile layout separately.", Weight: 1, Tier: "recommended"},
+		{ID: "seo.images", Pillar: "seo", Title: "Image text alternatives", Remediation: "Provide useful alternatives for informative images and empty alt attributes for decorative images.", Weight: 1, Tier: "recommended"},
+		{ID: "geo.access", Pillar: "geo", Title: "Extractable public response", Remediation: "Expose intended public information in server-delivered HTML.", Weight: 3, Foundational: true, Tier: "essential"},
+		{ID: "geo.entity", Pillar: "geo", Title: "Structured entity data", Remediation: "Add accurate, applicable Schema.org JSON-LD based on verified business or content facts.", Weight: 2, Tier: "recommended"},
+		{ID: "geo.structure", Pillar: "geo", Title: "Structured information", Remediation: "Use meaningful headings and semantic lists, tables, or definition lists where they clarify the content.", Weight: 2, Tier: "recommended"},
+		{ID: "geo.author", Pillar: "geo", Title: "Article attribution", Remediation: "For article content, identify the author and publish or update date accurately.", Weight: 1, Tier: "recommended"},
+		{ID: "agent.access", Pillar: "agent", Title: "Initial HTML readability", Remediation: "Serve meaningful public text in initial HTML so readers need not execute JavaScript to understand the page.", Weight: 3, Foundational: true, Tier: "essential"},
+		{ID: "agent.landmarks", Pillar: "agent", Title: "Navigation landmarks", Remediation: "Use main and navigation landmarks to identify page content and navigation.", Weight: 1, Tier: "recommended"},
+		{ID: "agent.controls", Pillar: "agent", Title: "Named interactive controls", Remediation: "Give interactive controls accessible names through visible labels or appropriate ARIA attributes.", Weight: 2, Tier: "recommended"},
+		{ID: "agent.links", Pillar: "agent", Title: "Named navigation links", Remediation: "Give navigation links meaningful visible or accessible names.", Weight: 1, Tier: "recommended"},
 	}
 }
 func evaluate(p pageResult) []reportmodel.Finding {
@@ -410,7 +411,7 @@ func evaluate(p pageResult) []reportmodel.Finding {
 	})
 	meaningful := len(strings.Fields(visible.String())) >= 20
 	for _, c := range registry {
-		f := reportmodel.Finding{ID: c.ID, Pillar: c.Pillar, Title: c.Title, URL: p.page.URL, Weight: c.Weight, Foundational: c.Foundational, Remediation: c.Remediation, Status: "pass"}
+		f := reportmodel.Finding{ID: c.ID, Pillar: c.Pillar, Title: c.Title, URL: p.page.URL, Weight: c.Weight, Tier: c.Tier, Foundational: c.Foundational, Remediation: c.Remediation, Status: "pass"}
 		if p.page.Error != "" {
 			f.Status = "unknown"
 			f.Evidence = p.page.Error
@@ -606,5 +607,84 @@ func score(findings []reportmodel.Finding) []reportmodel.Pillar {
 		}
 		pillars = append(pillars, p)
 	}
+	readiness, _ := scoreAgentReadiness(findings)
+	pillars = append(pillars, readiness)
 	return pillars
+}
+
+func scoreAgentReadiness(findings []reportmodel.Finding) (reportmodel.Pillar, reportmodel.AgentReadinessSummary) {
+	type accumulator struct {
+		total, observed, earned float64
+		passing, count          int
+	}
+	byTier := map[string]*accumulator{
+		"essential": {}, "recommended": {}, "bonus": {},
+	}
+	for _, f := range findings {
+		bucket := byTier[f.Tier]
+		if bucket == nil || f.Weight <= 0 || f.Status == "not_applicable" {
+			continue
+		}
+		bucket.total += f.Weight
+		bucket.count++
+		if f.Status == "unknown" {
+			continue
+		}
+		bucket.observed += f.Weight
+		if f.Status == "pass" {
+			bucket.earned += f.Weight
+			bucket.passing++
+		} else if f.Status == "partial" {
+			bucket.earned += f.Weight * .5
+		}
+	}
+	ess, rec, bonus := byTier["essential"], byTier["recommended"], byTier["bonus"]
+	applicable, observed := ess.total+rec.total, ess.observed+rec.observed
+	summary := reportmodel.AgentReadinessSummary{}
+	if applicable > 0 {
+		summary.Coverage = observed / applicable
+	}
+	summary.Essential = reportmodel.ReadinessTierSummary{Available: 80, Passing: ess.passing, Total: ess.count}
+	summary.Recommended = reportmodel.ReadinessTierSummary{Available: 20, Passing: rec.passing, Total: rec.count}
+	if ess.observed > 0 {
+		summary.Essential.Earned = 80 * ess.earned / ess.observed
+	}
+	if rec.observed > 0 {
+		summary.Recommended.Earned = 20 * rec.earned / rec.observed
+	}
+	for _, f := range findings {
+		if f.Tier != "bonus" || f.Weight <= 0 || f.Status == "unknown" || f.Status == "not_applicable" {
+			continue
+		}
+		if f.Status == "pass" {
+			summary.BonusPoints += f.Weight
+			summary.PositiveSignals++
+		} else if f.Status == "partial" {
+			summary.BonusPoints += f.Weight * .5
+			summary.PositiveSignals++
+		}
+	}
+	if summary.BonusPoints > 5 {
+		summary.BonusPoints = 5
+	}
+	var value *float64
+	if applicable > 0 && summary.Coverage >= .8 && ess.observed > 0 && rec.observed > 0 {
+		n := math.Round(math.Min(100, summary.Essential.Earned+summary.Recommended.Earned+summary.BonusPoints)*10) / 10
+		value = &n
+		summary.ScoreLabel = readinessLabel(n)
+	}
+	return reportmodel.Pillar{ID: "agent_readiness", Name: "Agent readiness", Score: value, Coverage: summary.Coverage}, summary
+}
+
+func readinessLabel(score float64) string {
+	switch {
+	case score >= 90:
+		return "Strong technical baseline"
+	case score >= 70:
+		return "Several improvements available"
+	case score >= 50:
+		return "Important blockers remain"
+	default:
+		return "Agents are likely to struggle"
+	}
 }

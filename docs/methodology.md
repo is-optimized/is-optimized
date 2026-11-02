@@ -1,6 +1,6 @@
 # MVP methodology and provenance
 
-This document records the independently implemented MVP check registry and subsequent parity work. It does not claim parity with the hosted Is Agentic service. The source of executable behavior is the registries and evaluation in `internal/scanner/checks.go` and `internal/scanner/readiness.go`. New reports identify methodology `2026-11-agentready-v1` and selection policy `home-links-sitemap-two-hop-v2`; prior reports retain the versions under which they were produced.
+This document records the independently implemented MVP check registry and subsequent parity work. It does not claim complete parity with the hosted Is Agentic service. The source of executable behavior is the registries and evaluation in `internal/scanner/checks.go` and `internal/scanner/readiness.go`. New reports identify methodology `2026-11-agentready-v2` and selection policy `home-links-sitemap-two-hop-v2`; prior reports retain the versions under which they were produced.
 
 ## Reference provenance
 
@@ -17,7 +17,17 @@ No upstream source was copied, no npm package is used at runtime, and no hosted 
 
 ## Weighted registry
 
-Weights are initial engineering choices, not empirically calibrated predictors of rankings, citations, or successful agent actions. Pass earns full weight, partial earns half, fail earns zero. Not-applicable excludes the check from both denominators. Unknown retains its weight in total applicable weight but is excluded from observed weight. Scores are withheld below 80% coverage or when any foundational check is unknown. A known failure is different from an unobservable page.
+Weights are initial engineering choices, not empirically calibrated predictors of rankings, citations, or successful agent actions. Pass earns full weight, partial earns half, fail earns zero. Not-applicable excludes the check from both denominators. Unknown retains its weight in total applicable weight but is excluded from observed weight. Scores are withheld below 80% coverage or when any foundational check is unknown. A known failure is different from an unobservable page. The November 2026 methodology version limits `geo.author` applicability to Article, BlogPosting, or NewsArticle JSON-LD and `og:type=article`; an HTML `<article>` container alone is not editorial evidence.
+
+The original SEO, GEO, and AEO scores remain separate and keep their existing
+formula. The additive Agent readiness score uses an 80-point Essential pool,
+20-point Recommended pool, and Bonus signals capped at +5. Partial findings
+earn half. Unknown checks lower coverage but are not counted as failures;
+not-applicable checks are excluded. The numeric score is withheld below 80%
+coverage or until both scored tiers have observed evidence. The final score is
+capped at 100. Labels describe score bands, not rankings or agent task success.
+These are initial weights pending calibration against the captured public
+reports.
 
 Each check runs against every selected content page. The pillar score aggregates the resulting page/check observations, so each sampled page contributes equally for a given check. All unsuccessful fetches, non-200 responses, denied robots access, unsupported content types, truncation, and parser-limit failures produce unknown weighted findings, including foundational unknowns. A 403 or bot wall is never interpreted as a fully observed failing site.
 
