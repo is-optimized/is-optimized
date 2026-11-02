@@ -242,7 +242,7 @@ func annotateReadiness(findings []reportmodel.Finding) {
 		if f.Stage == "" {
 			f.Stage = "read"
 		}
-		if f.ID == "seo.index" || f.ID == "seo.sitemap" || strings.HasPrefix(f.ID, "agent.discovery") {
+		if f.ID == "seo.index" || f.ID == "seo.sitemap_quality" || f.ID == "seo.sitemap_freshness" || strings.HasPrefix(f.ID, "agent.discovery") {
 			f.Stage = "find"
 		}
 		if f.Applicability == "" {
@@ -251,9 +251,9 @@ func annotateReadiness(findings []reportmodel.Finding) {
 				f.Applicability = "The page does not contain the content or controls to which this check applies."
 			}
 		}
-		if f.Status != "unknown" && f.EvidenceLevel == "" && f.ID != "seo.sitemap" && !strings.HasPrefix(f.ID, "agent.discovery") {
+		if f.Status != "unknown" && f.EvidenceLevel == "" && f.ID != "seo.sitemap_quality" && f.ID != "seo.sitemap_freshness" && !strings.HasPrefix(f.ID, "agent.discovery") {
 			switch f.ID {
-			case "seo.access", "geo.access", "seo.index", "seo.hsts", "seo.page_status":
+			case "seo.access", "geo.access", "seo.index", "seo.hsts", "seo.page_status", "seo.sitemap_quality", "seo.sitemap_freshness":
 				f.EvidenceLevel = "observed_response"
 			default:
 				f.EvidenceLevel = "observed_html"
@@ -269,7 +269,7 @@ func annotateReadiness(findings []reportmodel.Finding) {
 			f.Standards = references("partial", "AR-READ-08")
 		case "seo.access":
 			f.Standards = references("partial", "AR-READ-02")
-		case "seo.sitemap":
+		case "seo.sitemap_quality":
 			f.Standards = references("partial", "AR-FIND-03")
 		case "agent.discovery/llms.txt":
 			f.Standards = references("partial", "AR-READ-07")
