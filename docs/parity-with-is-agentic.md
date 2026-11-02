@@ -2,9 +2,29 @@
 
 Status: draft inventory. This file is the working map for the parity effort
 requested in `~/Downloads/is-optimized-coding-agent-prompt.md`. It is not a
-claim of full parity or live verification. The supplied prompt summarizes
-observations from `prosody.chat`; the seven underlying reports and the complete
-`npx is-agentic` inventory are not yet in the repository.
+claim of full parity. Fresh public `npx is-agentic@1.0.1` JSON reports were
+collected for the eight requested domains on 2026-11-02 UTC. The CLI returns
+failed and partial issues, but omits its passing-check inventory, so these
+reports do not disclose every check behind its score.
+
+## Captured public report baselines
+
+| Domain | Is Agentic score | Report |
+| --- | ---: | --- |
+| `prosody.chat` | 68 | [report](https://is-agentic.com/scan/prosody.chat) |
+| `is-agentic.com` | 100 | [report](https://is-agentic.com/scan/is-agentic.com) |
+| `vercel.com` | 96 | [report](https://is-agentic.com/scan/vercel.com) |
+| `github.com` | 69 | [report](https://is-agentic.com/scan/github.com) |
+| `galileo.ai` | 98 | [report](https://is-agentic.com/scan/galileo.ai) |
+| `gymshark.com` | 37 | [report](https://is-agentic.com/scan/gymshark.com) |
+| `parallel.ai` | 94 | [report](https://is-agentic.com/scan/parallel.ai) |
+| `is-optimized.com` | 68 | [report](https://is-agentic.com/scan/is-optimized.com) |
+
+These are mutable public report URLs and may be refreshed upstream. The exact
+retrieved JSON was kept in the local task's temporary directory, not committed.
+The CLI reported 29 distinct failed or partial issue IDs across the eight
+reports. Every observed issue is mapped below; issue-only output is not enough
+to claim that the upstream inventory is complete.
 
 ## Existing checks in the current scanner
 
@@ -65,6 +85,54 @@ deliberate: an existing related heuristic is not treated as equivalent coverage.
 | Hidden prompt-instruction indicators | `agent.prompt_injection_signals` | None | Pending; detection reports evidence only and never follows or executes text. |
 | Site-type declaration and applicable check selection | `site.type` | Existing per-check applicability | Pending; extend the existing mechanism instead of introducing a parallel one. |
 | Optional observed task evaluation | `agent.task_evaluation` | `Report.BehavioralEvaluation` | `not_run` by default; opt-in, off-score, and needs separate cost/credential authorization. |
+
+## Atomic mapping for every issue returned by the captured reports
+
+The upstream CLI's JSON schema exposes issue IDs and score totals, not passing
+check definitions. This is therefore an exhaustive mapping of returned issues,
+not of all upstream checks. A planned ID identifies implementation work; it
+does not imply that the check already exists.
+
+| Upstream issue ID | Tier | Reports with failed/partial issue | Is-optimized mapping | Mapping status |
+| --- | --- | --- | --- | --- |
+| `agent-friendly-404` | Essential | prosody.chat, github.com, gymshark.com, is-optimized.com | `agent.markdown_404` | Planned site-level response probe. |
+| `agent-instruction` | Recommended | prosody.chat, gymshark.com, parallel.ai, is-optimized.com | `agent.instructions.when_to_use` | Existing link discovery is insufficient; content-quality check planned. |
+| `agentic-search-specific` | Recommended | prosody.chat, gymshark.com, parallel.ai | `agent.discoverability.docs` | Search-provider/key dependent; not observed without a configured source. |
+| `api-error-model` | Recommended | github.com | `agent.openapi.error_schema` | Planned contract parsing. |
+| `api-schema-analysis` | Recommended | github.com, gymshark.com | `agent.openapi.complexity` | Planned bounded schema analysis. |
+| `api-versioning-policy` | Recommended | github.com | `agent.openapi.versioning` | Planned explicit version/deprecation evidence. |
+| `brand-search-accuracy` | Recommended | prosody.chat, is-agentic.com, vercel.com, galileo.ai, is-optimized.com | `agent.discoverability.brand` | Search-provider/key dependent; never infer from page HTML. |
+| `cli-tool` | Recommended | galileo.ai, gymshark.com | `agent.developer.cli` | Planned first-party package discovery. |
+| `content-no-js` | Essential | vercel.com, github.com, galileo.ai, gymshark.com, parallel.ai | `agent.access` | Existing initial-HTML heuristic is partial; no browser execution. |
+| `developer-portal` | Recommended | gymshark.com | `agent.developer.portal` | Existing docs-link heuristic is partial. |
+| `function-calling-compat` | Recommended | github.com, gymshark.com | `agent.openapi.function_calling` | Planned typed operation/schema analysis. |
+| `json-error-responses` | Essential | gymshark.com | `agent.api.json_errors` | Planned; only unauthenticated GET probes. |
+| `json-ld` | Recommended | prosody.chat, github.com, gymshark.com, is-optimized.com | `geo.entity` | Existing entity-presence heuristic is partial; validation/completeness planned. |
+| `markdown-negotiation-vary` | Essential | prosody.chat, github.com, gymshark.com, is-optimized.com | `agent.markdown` | Planned server-side GET negotiation probe. |
+| `mcp-resource-listing` | Essential | gymshark.com, parallel.ai | `agent.mcp.resources` | Planned read-only MCP discovery/list calls. |
+| `mcp-server` | Recommended | vercel.com, github.com | `agent.mcp.server` | Existing interface-link observation is partial. |
+| `metadata-completeness` | Recommended | prosody.chat, gymshark.com, is-optimized.com | `seo.social_metadata` | Existing canonical check is partial; OG/Twitter/language checks planned. |
+| `oauth-support` | Essential | parallel.ai | `agent.oauth.metadata` | Existing auth-link observation is partial; metadata-only validation planned. |
+| `onboarding-friction` | Recommended | vercel.com, gymshark.com | `agent.api.onboarding` | Planned public health/error/onboarding observations. |
+| `openapi-spec` | Essential | github.com, gymshark.com | `agent.openapi.discovery` | Existing link discovery is partial; document parsing planned. |
+| `org-schema-completeness` | Recommended | prosody.chat, github.com, galileo.ai, gymshark.com, parallel.ai, is-optimized.com | `geo.organization` | Existing entity-presence check is partial; field/relationship validation planned. |
+| `pricing-info` | Recommended | gymshark.com | `agent.read.pricing` | Existing linked-pricing observation is partial; no pricing policy inferred. |
+| `public-api` | Recommended | galileo.ai, gymshark.com | `agent.api.reachability` | Planned read-only advertised GET probe. |
+| `public-api-docs` | Recommended | gymshark.com | `agent.developer.api_links` | Existing docs/resource links are partial. |
+| `rate-limit-headers` | Recommended | vercel.com, github.com, galileo.ai, parallel.ai | `agent.api.rate_limits` | Planned; probe safe unauthenticated GET responses only. |
+| `redirect-hygiene` | Essential | gymshark.com | `seo.redirect_hygiene` | Existing requested/final URL evidence is partial; chain/markup checks planned. |
+| `scoped-permissions` | Essential | vercel.com, gymshark.com | `agent.openapi.scopes` | Planned scope parsing; no authorization or token exchange. |
+| `sitemap` | Recommended | prosody.chat, is-optimized.com | `seo.sitemap_quality` | Existing sitemap discovery is partial; index/URL/freshness validation planned. |
+| `trust-anchors` | Recommended | prosody.chat, galileo.ai, gymshark.com, is-optimized.com | `geo.trust_pages` | Planned bounded probes for about/contact/privacy/terms. |
+
+Captured Is-Optimized production baselines use the older `2026-10-agentready-v1`
+methodology, despite the current source being newer. The public service returned
+these completed reports: `prosody.chat` SEO 95.8 / GEO 70 / AEO 95.8 (2 pages),
+`is-agentic.com` 100 / 93.4 / 100 (5 pages), and `vercel.com` 94.2 / 93.1 / 92.9
+(5 pages). The `github.com` report had only one page and all scores withheld;
+`galileo.ai` was still running at last read. Further POST scan requests were
+rate-limited, so no retry was made. These are production baselines, not
+verification of this candidate.
 
 ## Shared scoring and evidence work
 
