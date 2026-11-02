@@ -160,7 +160,7 @@ func (ss *session) fetchWithHeaders(raw string, content bool, site string, heade
 			ss.requestBudgetExhaustions.Add(1)
 			return out, errors.New("scan request budget exhausted")
 		}
-		ctx, cancel := context.WithTimeout(ss.ctx, 5*time.Second)
+		ctx, cancel := context.WithTimeout(ss.ctx, 10*time.Second)
 		req, e := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 		if e != nil {
 			cancel()
