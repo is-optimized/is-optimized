@@ -36,7 +36,10 @@ responses with the normal homepage response. Training-agent blocking is
 informational. `agent.markdown` exercises `Accept: text/markdown` on the
 homepage, checks `Vary: Accept`, and probes `/index.md` as a fallback;
 `agent.markdown_404` makes a unique nonexistent-path request using both HTML
-and Markdown Accept headers. These probes run concurrently through the same
+and Markdown Accept headers. Four `geo.trust.*` checks each inspect one
+first-party About, Contact, Privacy, or Terms route, preferring a matching
+homepage link and otherwise probing a standard path. These probes run
+concurrently through the same
 SSRF-safe GET transport, bounded request/byte budget, same-origin redirect
 policy, and scan deadline. They do not yet validate Markdown frontmatter,
 alternate-link destinations, or Markdown error-body link targets.
@@ -66,6 +69,7 @@ bot wall is never interpreted as a fully observed failing site.
 | `agent.robots` | 3 | Essential. Pass when all four retrieval agents are allowed by the parsed robots rules and return HTTP 200 with at least 80% of the normal homepage response bytes; fail for a robots block, 401/403, or obvious challenge body; unknown on unavailable/malformed policy or incomplete fetch. | Training-agent rules and Content-Signal are informational; response similarity is byte-count based, not semantic equivalence. |
 | `agent.markdown` | 3 | Essential. Pass when Markdown negotiation returns non-HTML Markdown, `Vary: Accept`, and the normal homepage response is HTML; partial when only one negotiation signal is present; fail when neither negotiation nor `/index.md` works; unknown on fetch failure. | One homepage and one fallback probe; frontmatter, code fences, and alternate-link targets are not evaluated. |
 | `agent.markdown_404` | 3 | Essential. Pass for HTML and Markdown 404/410 responses with a Markdown body of at least 20 characters containing a link; partial for correct status without a qualified Markdown body; fail for soft 404 or other status; unknown when either request fails. | Unique path and GET only; link destination and page-specific error behavior are not validated. |
+| `geo.trust.about`, `geo.trust.contact`, `geo.trust.privacy`, `geo.trust.terms` | 1 each | Recommended. Pass for HTTP 200 HTML with at least 500 visible-text bytes; partial for a non-empty shorter page; fail when missing, empty, or not HTML; unknown when fetch is not permitted or fails. | Probes one same-origin URL per topic, preferring matching homepage links; content truth and legal sufficiency are not judged. |
 
 This inventory and fixture results are review evidence for the MVP, not empirical calibration. Additional checks require explicit registry/version changes and tests. Crawler-specific training policies, alleged universal MCP discovery paths, forced API requirements, and fixed answer-length rules carry no score penalty.
 
