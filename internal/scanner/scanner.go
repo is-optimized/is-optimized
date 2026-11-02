@@ -24,7 +24,11 @@ const MethodologyVersion = "2026-11-agentready-v3"
 const maxBody = 2 << 20
 const maxContentPages = 32
 const maxRequestCount = 64
-const maxDiscoveryCount = 32
+
+// Reserve two extra request slots for redirects during page sampling; keep
+// the remainder available for robots, sitemap, and site-level probes.
+const maxPageRequests = maxContentPages + 2
+const maxDiscoveryCount = maxRequestCount - maxPageRequests
 const maxScanBytes = 12 << 20
 const maxScanDuration = 60 * time.Second
 const defaultPageConcurrency = 8
@@ -48,20 +52,22 @@ type policy struct {
 	status  int
 }
 type session struct {
-	s                          *Scanner
-	ctx                        context.Context
-	requests                   atomic.Int32
-	bytes                      atomic.Int64
-	discovery                  atomic.Int32
-	pageWorkers                atomic.Int32
-	peakPageWorkers            atomic.Int32
-	requestBudgetExhaustions   atomic.Int32
-	discoveryBudgetExhaustions atomic.Int32
-	scanByteBudgetExhaustions  atomic.Int32
-	responseSizeExhaustions    atomic.Int32
-	timeouts                   atomic.Int32
-	mu                         sync.Mutex
-	policies                   map[string]policy
+	s                            *Scanner
+	ctx                          context.Context
+	requests                     atomic.Int32
+	pageRequests                 atomic.Int32
+	bytes                        atomic.Int64
+	discovery                    atomic.Int32
+	pageWorkers                  atomic.Int32
+	peakPageWorkers              atomic.Int32
+	requestBudgetExhaustions     atomic.Int32
+	discoveryBudgetExhaustions   atomic.Int32
+	scanByteBudgetExhaustions    atomic.Int32
+	responseSizeExhaustions      atomic.Int32
+	pageRequestBudgetExhaustions atomic.Int32
+	timeouts                     atomic.Int32
+	mu                           sync.Mutex
+	policies                     map[string]policy
 }
 type response struct {
 	url         *url.URL
@@ -123,10 +129,18 @@ func readBudgeted(r io.Reader, total *atomic.Int64, responseLimit, totalLimit in
 }
 
 func (ss *session) fetch(raw string, content bool, site string) (response, error) {
-	return ss.fetchWithHeaders(raw, content, site, nil)
+	return ss.fetchRequest(raw, content, site, nil, false, false)
 }
 
 func (ss *session) fetchWithHeaders(raw string, content bool, site string, headers http.Header) (response, error) {
+	return ss.fetchRequest(raw, content, site, headers, false, false)
+}
+
+func (ss *session) fetchPage(raw, site string) (response, error) {
+	return ss.fetchRequest(raw, true, site, nil, true, false)
+}
+
+func (ss *session) fetchRequest(raw string, content bool, site string, headers http.Header, pageRequest, discoveryRequest bool) (response, error) {
 	var out response
 	u, err := url.Parse(raw)
 	if err != nil {
@@ -155,6 +169,14 @@ func (ss *session) fetchWithHeaders(raw string, content bool, site string, heade
 		if ss.bytes.Load() >= maxScanBytes {
 			ss.scanByteBudgetExhaustions.Add(1)
 			return out, errScanByteBudget
+		}
+		if pageRequest && ss.pageRequests.Add(1) > maxPageRequests {
+			ss.pageRequestBudgetExhaustions.Add(1)
+			return out, errors.New("page request budget exhausted")
+		}
+		if discoveryRequest && ss.discovery.Add(1) > maxDiscoveryCount {
+			ss.discoveryBudgetExhaustions.Add(1)
+			return out, errors.New("discovery budget exhausted")
 		}
 		if ss.requests.Add(1) > maxRequestCount {
 			ss.requestBudgetExhaustions.Add(1)
@@ -234,52 +256,35 @@ func (ss *session) getPolicy(u *url.URL) policy {
 		return p
 	}
 	p := policy{}
-	if ss.discovery.Add(1) > maxDiscoveryCount {
-		ss.discoveryBudgetExhaustions.Add(1)
-		p.err = errors.New("discovery budget exhausted")
-	} else {
-		r, e := ss.fetch(key+"/robots.txt", false, key)
-		switch {
-		case e != nil:
-			p.err = errors.New("robots policy unavailable")
-		case r.code == 404 || r.code == 410: // absent policy permits crawling
-			p.status = r.code
-		case r.code != 200:
-			p.status = r.code
-			p.err = errors.New("robots policy unavailable")
-		default:
-			p.present = true
-			p.status = r.code
-			p.rules, p.err = parseRobots(string(r.body))
-		}
+	r, e := ss.fetchRequest(key+"/robots.txt", false, key, nil, false, true)
+	switch {
+	case e != nil:
+		p.err = errors.New("robots policy unavailable")
+	case r.code == 404 || r.code == 410: // absent policy permits crawling
+		p.status = r.code
+	case r.code != 200:
+		p.status = r.code
+		p.err = errors.New("robots policy unavailable")
+	default:
+		p.present = true
+		p.status = r.code
+		p.rules, p.err = parseRobots(string(r.body))
 	}
 	ss.policies[key] = p
 	return p
 }
 func (ss *session) probe(raw, site string) (response, error) {
-	if ss.discovery.Add(1) > maxDiscoveryCount {
-		ss.discoveryBudgetExhaustions.Add(1)
-		return response{}, errors.New("discovery budget exhausted")
-	}
-	return ss.fetch(raw, true, site)
+	return ss.fetchRequest(raw, true, site, nil, false, true)
 }
 
 func (ss *session) probeAccept(raw, site, accept string) (response, error) {
-	if ss.discovery.Add(1) > maxDiscoveryCount {
-		ss.discoveryBudgetExhaustions.Add(1)
-		return response{}, errors.New("discovery budget exhausted")
-	}
 	headers := make(http.Header)
 	headers.Set("Accept", accept)
-	return ss.fetchWithHeaders(raw, true, site, headers)
+	return ss.fetchRequest(raw, true, site, headers, false, true)
 }
 
 func (ss *session) probeHeaders(raw, site string, headers http.Header) (response, error) {
-	if ss.discovery.Add(1) > maxDiscoveryCount {
-		ss.discoveryBudgetExhaustions.Add(1)
-		return response{}, errors.New("discovery budget exhausted")
-	}
-	return ss.fetchWithHeaders(raw, false, site, headers)
+	return ss.fetchRequest(raw, false, site, headers, false, true)
 }
 
 func (ss *session) probeExternal(raw string) (response, error) {
@@ -299,7 +304,7 @@ func (s *Scanner) Scan(ctx context.Context, domain string) (reportmodel.Report, 
 	report := reportmodel.Report{ID: hex.EncodeToString(id), Domain: domain, StartedAt: time.Now().UTC(), MethodologyVersion: MethodologyVersion, SelectionPolicy: "home-links-sitemap-two-hop-v2", BehavioralEvaluation: "not_run"}
 	ss := &session{s: s, ctx: ctx, policies: map[string]policy{}}
 	start := time.Now()
-	home, fetchErr := ss.fetch("https://"+domain+"/", true, "")
+	home, fetchErr := ss.fetchPage("https://"+domain+"/", "")
 	pages := []pageResult{analyze(home, fetchErr, "https://"+domain+"/", time.Since(start))}
 	homeURL, _ := url.Parse("https://" + domain + "/")
 	if home.url != nil {
@@ -310,12 +315,13 @@ func (s *Scanner) Scan(ctx context.Context, domain string) (reportmodel.Report, 
 		links := selectLinks(pages[0].doc, home.url)
 		sitemapLinks, _, sitemapFindings := sitemapURLs(ss, home.url)
 		report.Findings = append(report.Findings, sitemapFindings...)
-		selected := selectRepresentative(append(links, sitemapLinks...), home.url, maxContentPages-1)
+		additionalPages := max(0, min(maxContentPages-len(pages), maxPageRequests-int(ss.pageRequests.Load())))
+		selected := selectRepresentative(append(links, sitemapLinks...), home.url, additionalPages)
 		results := ss.fetchPages(selected, home.url)
 		pages = append(pages, results...)
 		// Fill only unused sample slots from one additional link hop. Do not
 		// recursively follow these pages or expand the sitemap candidate set.
-		remaining := maxContentPages - len(pages)
+		remaining := max(0, min(maxContentPages-len(pages), maxPageRequests-int(ss.pageRequests.Load())))
 		if remaining > 0 {
 			var secondHop []string
 			seen := map[string]bool{home.url.String(): true}
@@ -371,7 +377,7 @@ func (s *Scanner) Scan(ctx context.Context, domain string) (reportmodel.Report, 
 		"pages_selected", len(report.Pages), "pages_with_error", failedPages,
 		"page_concurrency_limit", concurrency, "peak_page_workers", ss.peakPageWorkers.Load(),
 		"outbound_requests_in_flight", len(s.slots), "outbound_request_limit", cap(s.slots),
-		"request_budget_exhaustions", ss.requestBudgetExhaustions.Load(), "discovery_budget_exhaustions", ss.discoveryBudgetExhaustions.Load(),
+		"request_budget_exhaustions", ss.requestBudgetExhaustions.Load(), "page_request_budget_exhaustions", ss.pageRequestBudgetExhaustions.Load(), "discovery_budget_exhaustions", ss.discoveryBudgetExhaustions.Load(),
 		"scan_byte_budget_exhaustions", ss.scanByteBudgetExhaustions.Load(), "response_size_exhaustions", ss.responseSizeExhaustions.Load(),
 		"timeouts", ss.timeouts.Load(), "duration_ms", time.Since(start).Milliseconds(), "deadline_reached", deadlineReached(ctx))
 	return report, nil
@@ -408,7 +414,7 @@ func (ss *session) fetchPages(selected []string, home *url.URL) []pageResult {
 			}
 			defer func() { ss.pageWorkers.Add(-1); <-workers }()
 			started := time.Now()
-			r, err := ss.fetch(link, true, origin(home))
+			r, err := ss.fetchPage(link, origin(home))
 			results[i] = analyze(r, err, link, time.Since(started))
 		}(i, link)
 	}

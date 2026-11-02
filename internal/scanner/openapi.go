@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/is-optimized/is-optimized/internal/reportmodel"
 	"golang.org/x/net/html"
@@ -15,6 +16,7 @@ import (
 )
 
 const openAPISpecURL = "https://spec.openapis.org/oas/latest.html"
+const maxOpenAPIProbes = 3
 
 var openAPIVersionPattern = regexp.MustCompile(`^3\.\d+\.\d+$`)
 
@@ -42,40 +44,66 @@ func openAPIChecks(ss *session, home *url.URL, homepage response, page pageResul
 	var decoded map[string]any
 	var lastErr error
 	var lastEvidence string
-	for _, candidate := range candidates {
-		var r response
-		var err error
-		if origin(candidate) == origin(home) {
-			r, err = ss.probe(candidate.String(), origin(home))
-		} else {
-			r, err = ss.probeExternal(candidate.String())
-		}
+	type probeResult struct {
+		candidate *url.URL
+		response  response
+		err       error
+	}
+	results := make([]probeResult, len(candidates))
+	var wg sync.WaitGroup
+	for i, candidate := range candidates {
+		wg.Add(1)
+		go func(i int, candidate *url.URL) {
+			defer wg.Done()
+			var r response
+			var err error
+			if origin(candidate) == origin(home) {
+				r, err = ss.probe(candidate.String(), origin(home))
+			} else {
+				r, err = ss.probeExternal(candidate.String())
+			}
+			results[i] = probeResult{candidate: candidate, response: r, err: err}
+		}(i, candidate)
+	}
+	wg.Wait()
+	for _, result := range results {
+		candidate, r, err := result.candidate, result.response, result.err
 		if err != nil {
-			lastErr = err
-			lastEvidence = "OpenAPI document probe was not observed: " + err.Error()
+			if lastErr == nil {
+				lastErr = err
+				lastEvidence = "OpenAPI document probe was not observed: " + err.Error()
+			}
 			continue
 		}
 		if r.code == http.StatusNotFound || r.code == http.StatusGone {
-			lastEvidence = fmt.Sprintf("%s returned HTTP %d", candidate.Path, r.code)
+			if lastEvidence == "" {
+				lastEvidence = fmt.Sprintf("%s returned HTTP %d", candidate.Path, r.code)
+			}
 			continue
 		}
 		if r.code != http.StatusOK {
-			lastEvidence = fmt.Sprintf("%s returned HTTP %d", candidate.Path, r.code)
+			if lastEvidence == "" {
+				lastEvidence = fmt.Sprintf("%s returned HTTP %d", candidate.Path, r.code)
+			}
 			if r.code >= http.StatusInternalServerError {
-				lastErr = fmt.Errorf("server error response")
+				if lastErr == nil {
+					lastErr = fmt.Errorf("server error response")
+				}
 				lastEvidence = fmt.Sprintf("OpenAPI document was not observed: %s returned HTTP %d", candidate.Path, r.code)
 			}
 			continue
 		}
 		decoded, _, err = decodeOpenAPI(r.body)
 		if err != nil {
-			chosen = candidate
-			if errors.Is(err, errOpenAPIYAMLComplexity) {
-				lastEvidence = "OpenAPI document parsing was not observed: " + err.Error()
-			} else {
-				lastEvidence = "A public contract response was observed but was not valid OpenAPI JSON or YAML."
+			if chosen == nil {
+				chosen = candidate
+				if errors.Is(err, errOpenAPIYAMLComplexity) {
+					lastEvidence = "OpenAPI document parsing was not observed: " + err.Error()
+				} else {
+					lastEvidence = "A public contract response was observed but was not valid OpenAPI JSON or YAML."
+				}
 			}
-			break
+			continue
 		}
 		chosen = candidate
 		lastEvidence = ""
@@ -148,8 +176,8 @@ func openAPIHints(home *url.URL, homepage response, page pageResult) (bool, []*u
 	for _, path := range []string{"/openapi.json", "/openapi.yaml", "/swagger.json", "/api/openapi.json"} {
 		add(origin(home) + path)
 	}
-	if len(candidates) > 5 {
-		candidates = candidates[:5]
+	if len(candidates) > maxOpenAPIProbes {
+		candidates = candidates[:maxOpenAPIProbes]
 	}
 	return true, candidates
 }
@@ -198,7 +226,11 @@ func assessOpenAPI(document map[string]any) openAPIStats {
 	stats.version3 = openAPIVersionPattern.MatchString(version)
 	info := mapValue(document["info"])
 	stats.versioned = stringValue(info["version"]) != ""
-	stats.validRoot = stats.version3 && stringValue(info["title"]) != "" && stats.versioned
+	_, hasComponents := document["components"]
+	_, hasPaths := document["paths"]
+	_, hasWebhooks := document["webhooks"]
+	stats.validRoot = stats.version3 && stringValue(info["title"]) != "" && stats.versioned &&
+		((hasComponents && isOpenAPIObject(document["components"])) || (hasPaths && isOpenAPIObject(document["paths"])) || (hasWebhooks && isOpenAPIObject(document["webhooks"])))
 	paths := mapValue(document["paths"])
 	for _, pathItemValue := range paths {
 		pathItem := mapValue(pathItemValue)
@@ -252,6 +284,11 @@ func assessOpenAPI(document map[string]any) openAPIStats {
 	}
 	stats.hasOperations = stats.operations > 0
 	return stats
+}
+
+func isOpenAPIObject(value any) bool {
+	_, ok := value.(map[string]any)
+	return ok
 }
 
 func openAPIFindings(raw string, document map[string]any, applicable bool, note *string) []reportmodel.Finding {

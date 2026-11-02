@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/is-optimized/is-optimized/internal/reportmodel"
 	"golang.org/x/net/html"
@@ -45,24 +46,54 @@ func siteAgentChecks(ss *session, home *url.URL, homepage response, homepagePage
 			{ID: "agent.oauth.protected_resource", Pillar: "agent", Title: "Protected-resource metadata", Status: "unknown", Weight: 1, Tier: "recommended", URL: origin(home) + "/.well-known/oauth-protected-resource", Evidence: "Homepage response unavailable; authentication metadata was not probed."},
 		}
 	}
-	// Run the essential probes first and in a stable order. The scan shares a
-	// finite discovery budget with sitemap and content selection; unordered
-	// goroutines could otherwise make an optional check consume the last slot
-	// before an essential check gets scheduled.
+	// Run checks in priority groups. Checks within a group can share bounded
+	// outbound capacity; the next group starts only after the current group has
+	// reserved its share of the finite discovery budget.
 	out := make([]reportmodel.Finding, 0, 24)
-	out = append(out, markdownNegotiationCheck(ss, home, homepage))
-	out = append(out, markdownNotFoundCheck(ss, home))
-	out = append(out, aiCrawlerAccessCheck(ss, home, homepage))
-	out = append(out, openAPIChecks(ss, home, homepage, homepagePage)...)
-	out = append(out, oauthChecks(ss, home, homepagePage)...)
-	out = append(out, apiCatalogChecks(ss, home, homepagePage)...)
+	out = append(out, runFindingChecks(
+		func() []reportmodel.Finding {
+			return []reportmodel.Finding{markdownNegotiationCheck(ss, home, homepage)}
+		},
+		func() []reportmodel.Finding { return []reportmodel.Finding{markdownNotFoundCheck(ss, home)} },
+		func() []reportmodel.Finding { return []reportmodel.Finding{aiCrawlerAccessCheck(ss, home, homepage)} },
+		func() []reportmodel.Finding { return openAPIChecks(ss, home, homepage, homepagePage) },
+		func() []reportmodel.Finding { return oauthChecks(ss, home, homepagePage) },
+		func() []reportmodel.Finding { return apiCatalogChecks(ss, home, homepagePage) },
+	)...)
+	optional := make([]func() []reportmodel.Finding, 0, 8)
 	for _, trust := range trustPageDefinitions() {
-		out = append(out, trustPageCheck(ss, home, homepagePage, trust))
+		trust := trust
+		optional = append(optional, func() []reportmodel.Finding {
+			return []reportmodel.Finding{trustPageCheck(ss, home, homepagePage, trust)}
+		})
 	}
-	out = append(out, socialMetadataCheck(ss, home, homepagePage))
-	out = append(out, schemaChecks(home, homepagePage)...)
-	out = append(out, agentInstructionChecks(ss, home)...)
+	optional = append(optional,
+		func() []reportmodel.Finding {
+			return []reportmodel.Finding{socialMetadataCheck(ss, home, homepagePage)}
+		},
+		func() []reportmodel.Finding { return schemaChecks(home, homepagePage) },
+		func() []reportmodel.Finding { return agentInstructionChecks(ss, home) },
+	)
+	out = append(out, runFindingChecks(optional...)...)
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+func runFindingChecks(checks ...func() []reportmodel.Finding) []reportmodel.Finding {
+	results := make([][]reportmodel.Finding, len(checks))
+	var wg sync.WaitGroup
+	for i, check := range checks {
+		wg.Add(1)
+		go func(i int, check func() []reportmodel.Finding) {
+			defer wg.Done()
+			results[i] = check()
+		}(i, check)
+	}
+	wg.Wait()
+	var out []reportmodel.Finding
+	for _, result := range results {
+		out = append(out, result...)
+	}
 	return out
 }
 
