@@ -638,7 +638,7 @@ func scoreAgentReadiness(findings []reportmodel.Finding) (reportmodel.Pillar, re
 			bucket.earned += f.Weight * .5
 		}
 	}
-	ess, rec, bonus := byTier["essential"], byTier["recommended"], byTier["bonus"]
+	ess, rec := byTier["essential"], byTier["recommended"]
 	applicable, observed := ess.total+rec.total, ess.observed+rec.observed
 	summary := reportmodel.AgentReadinessSummary{}
 	if applicable > 0 {
