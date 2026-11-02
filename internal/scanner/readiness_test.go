@@ -164,6 +164,7 @@ func TestReadinessProbesAdvertisedContractsAndRecordsUnrunInterfaces(t *testing.
 		"/robots.txt": true, "/index.md": true, "/sitemap.xml": true, "/sitemap_index.xml": true,
 		"/openapi.json": true, "/openapi.yaml": true, "/swagger.json": true, "/api/openapi.json": true,
 		"/.well-known/oauth-authorization-server": true, "/.well-known/openid-configuration": true, "/.well-known/oauth-protected-resource": true,
+		"/.well-known/api-catalog": true,
 		"/llms.txt": true, "/llms-full.txt": true,
 	}
 	for _, request := range observedRequests {
