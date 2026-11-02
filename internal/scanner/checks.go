@@ -323,6 +323,9 @@ func evaluate(p pageResult) []reportmodel.Finding {
 		case "title":
 			title = text(n)
 		case "meta":
+			if strings.EqualFold(attr(n, "property"), "og:type") && strings.EqualFold(strings.TrimSpace(attr(n, "content")), "article") {
+				article = true
+			}
 			switch strings.ToLower(attr(n, "name")) {
 			case "viewport":
 				for _, part := range strings.FieldsFunc(strings.ToLower(attr(n, "content")), func(r rune) bool { return r == ',' || r == ';' }) {
@@ -378,8 +381,6 @@ func evaluate(p pageResult) []reportmodel.Finding {
 			main = true
 		case "nav":
 			nav = true
-		case "article":
-			article = true
 		case "time":
 			dated = attr(n, "datetime") != ""
 		case "a":
@@ -402,7 +403,7 @@ func evaluate(p pageResult) []reportmodel.Finding {
 				var value any
 				if json.Unmarshal([]byte(text(n)), &value) == nil {
 					entity = entity || hasEntity(value)
-					article = article || hasType(value, "Article")
+					article = article || isArticleSchema(value)
 				}
 			}
 		}
@@ -554,6 +555,14 @@ func hasType(v any, kind string) bool {
 			if hasType(a, kind) {
 				return true
 			}
+		}
+	}
+	return false
+}
+func isArticleSchema(value any) bool {
+	for _, kind := range []string{"Article", "BlogPosting", "NewsArticle"} {
+		if hasType(value, kind) {
+			return true
 		}
 	}
 	return false

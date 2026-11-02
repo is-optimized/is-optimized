@@ -20,7 +20,7 @@ import (
 	"github.com/is-optimized/is-optimized/internal/reportmodel"
 )
 
-const MethodologyVersion = "2026-10-agentready-v3"
+const MethodologyVersion = "2026-11-agentready-v1"
 const maxBody = 2 << 20
 const maxContentPages = 32
 const maxRequestCount = 64

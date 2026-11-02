@@ -39,6 +39,31 @@ func TestSEOObservations(t *testing.T) {
 		}
 	}
 }
+
+func TestArticleAttributionApplicabilityRequiresArticleEvidence(t *testing.T) {
+	cases := []struct {
+		name, body, want string
+	}{
+		{name: "generic article container", body: `<article><h1>Product overview</h1><p>Useful copy.</p></article>`, want: "not_applicable"},
+		{name: "Open Graph article", body: `<meta property="og:type" content="article"><h1>News</h1>`, want: "partial"},
+		{name: "BlogPosting JSON-LD", body: `<script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","headline":"News"}</script>`, want: "partial"},
+		{name: "NewsArticle JSON-LD graph", body: `<script type="application/ld+json">{"@graph":[{"@type":["Thing","NewsArticle"]}]}</script>`, want: "partial"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, f := range evaluate(observed(t, "https://example.com/", tc.body)) {
+				if f.ID == "geo.author" {
+					if f.Status != tc.want {
+						t.Fatalf("geo.author status=%q, want %q (%s)", f.Status, tc.want, f.Evidence)
+					}
+					return
+				}
+			}
+			t.Fatal("geo.author finding missing")
+		})
+	}
+}
+
 func TestDuplicateMetadataAndRedirectAliases(t *testing.T) {
 	a := observed(t, "https://example.com/", `<title>Same TITLE</title><meta name="description" content=" Same text ">`)
 	b := observed(t, "https://example.com/about", `<title>same title</title><meta name="description" content="same text">`)
