@@ -557,6 +557,53 @@ func TestSchemaCompletenessSameAsAndBreadth(t *testing.T) {
 	}
 }
 
+func TestLLMSiteInstructionsQualityAndWhenToUse(t *testing.T) {
+	home, _ := url.Parse("https://example.com/")
+	good := "# Example\n\n> A concise summary.\n\n## When to use this\nUse this site for specific research tasks.\n\n[Docs](/docs)\n[Pricing](/pricing)\n"
+	for _, tc := range []struct {
+		name, llms, quality, when, full string
+	}{
+		{name: "complete without non-standard frontmatter", llms: good, quality: "pass", when: "pass", full: "present"},
+		{name: "partial guide", llms: "# Example\n\n[Docs](/missing)\n", quality: "partial", when: "fail", full: "absent"},
+		{name: "missing guide", quality: "fail", when: "fail", full: "absent"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := fixtureScanner(func(r *http.Request) (*http.Response, error) {
+				switch r.URL.Path {
+				case "/robots.txt":
+					return reply(r, http.StatusNotFound, "", "text/plain"), nil
+				case "/llms.txt":
+					if tc.llms == "" {
+						return reply(r, http.StatusNotFound, "", "text/plain"), nil
+					}
+					return reply(r, http.StatusOK, tc.llms, "text/plain; charset=utf-8"), nil
+				case "/llms-full.txt":
+					if tc.full == "present" {
+						return reply(r, http.StatusOK, "# Full reference", "text/markdown"), nil
+					}
+					return reply(r, http.StatusNotFound, "", "text/plain"), nil
+				case "/docs", "/pricing":
+					return reply(r, http.StatusOK, "Page", "text/html"), nil
+				default:
+					return reply(r, http.StatusNotFound, "", "text/plain"), nil
+				}
+			})
+			ss := &session{s: s, ctx: context.Background(), policies: map[string]policy{}}
+			got := map[string]reportmodel.Finding{}
+			for _, f := range agentInstructionChecks(ss, home) {
+				got[f.ID] = f
+			}
+			if got["agent.instructions.quality"].Status != tc.quality || got["agent.instructions.when_to_use"].Status != tc.when {
+				t.Fatalf("instruction findings: quality=%+v when=%+v", got["agent.instructions.quality"], got["agent.instructions.when_to_use"])
+			}
+			full := got["agent.instructions.full"]
+			if tc.full == "present" && !strings.Contains(full.Evidence, "HTTP 200") {
+				t.Fatalf("full reference not observed: %+v", full)
+			}
+		})
+	}
+}
+
 func TestRedirectPrivateRejectedBeforeTransport(t *testing.T) {
 	calls := 0
 	s := fixtureScanner(func(r *http.Request) (*http.Response, error) {

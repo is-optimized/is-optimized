@@ -29,9 +29,15 @@ capped at 100. Labels describe score bands, not rankings or agent task success.
 These are initial weights pending calibration against the captured public
 reports.
 
-The current Agent readiness inventory includes sampled page checks plus three
-site-level checks. `agent.robots` reports named retrieval and training bot
-rules, `Content-Signal` directives, and compares four retrieval user-agent GET
+The current Agent readiness inventory includes sampled page checks plus site-
+level probes. `agent.instructions.quality` and `agent.instructions.when_to_use`
+assess a bounded `/llms.txt`, checking its heading, summary, size, fences,
+sampled links, and explicit task guidance; an optional `/llms-full.txt`
+presence observation carries no score. These do not judge factual quality or
+off-site search visibility.
+
+`agent.robots` reports named retrieval and training bot rules, `Content-Signal`
+directives, and compares four retrieval user-agent GET
 responses with the normal homepage response. Training-agent blocking is
 informational. `agent.markdown` exercises `Accept: text/markdown` on the
 homepage, checks `Vary: Accept`, and probes `/index.md` as a fallback;
@@ -41,8 +47,9 @@ first-party About, Contact, Privacy, or Terms route, preferring a matching
 homepage link and otherwise probing a standard path. These probes run
 concurrently through the same
 SSRF-safe GET transport, bounded request/byte budget, same-origin redirect
-policy, and scan deadline. They do not yet validate Markdown frontmatter,
-alternate-link destinations, or Markdown error-body link targets.
+policy, and scan deadline. The 404 check validates Markdown link syntax, but
+does not fetch its link target. Markdown alternate-link destinations are not
+yet evaluated.
 
 `seo.social_metadata` checks eight homepage signals: language, Open Graph
 title, description, image, type, URL, Twitter card, and canonical. A declared
@@ -80,6 +87,9 @@ bot wall is never interpreted as a fully observed failing site.
 | `agent.robots` | 3 | Essential. Pass when all four retrieval agents are allowed by the parsed robots rules and return HTTP 200 with at least 80% of the normal homepage response bytes; fail for a robots block, 401/403, or obvious challenge body; unknown on unavailable/malformed policy or incomplete fetch. | Training-agent rules and Content-Signal are informational; response similarity is byte-count based, not semantic equivalence. |
 | `agent.markdown` | 3 | Essential. Pass when Markdown negotiation returns non-HTML Markdown, `Vary: Accept`, and the normal homepage response is HTML; partial when only one negotiation signal is present; fail when neither negotiation nor `/index.md` works; unknown on fetch failure. | One homepage and one fallback probe; frontmatter, code fences, and alternate-link targets are not evaluated. |
 | `agent.markdown_404` | 3 | Essential. Pass for HTML and Markdown 404/410 responses with a Markdown body of at least 20 characters containing a link; partial for correct status without a qualified Markdown body; fail for soft 404 or other status; unknown when either request fails. | Unique path and GET only; link destination and page-specific error behavior are not validated. |
+| `agent.instructions.quality` | 1 | Recommended. Pass for a leading H1, quoted summary, at most 30,000 characters, balanced fences, Markdown links, and at least 80% of five sampled links resolving; partial for some structure but missing criteria; fail when unusable or absent; unknown on fetch failure. | Follows llms.txt's Markdown structure; YAML frontmatter is not required. Resolves at most five public links, rejects links with query credentials, and does not judge factual accuracy or search visibility. |
+| `agent.instructions.when_to_use` | 1 | Recommended. Pass when a specific when-to-use heading or phrase is present; fail when absent from a usable file; unknown when fetch fails. | Checks presence of guidance, not whether its use cases are correct or sufficiently specific. |
+| `agent.instructions.full` | 0 | Informational presence check for `/llms-full.txt`. | Presence does not award readiness points. |
 | `seo.sitemap_quality` | 2 | Recommended. Pass for valid sitemap XML containing same-origin page URLs; partial for valid XML without a usable same-origin page URL; fail when no valid sitemap is found; unknown when policy/fetch limits prevent observation. | Tries robots-declared URLs first, then `/sitemap.xml` and `/sitemap_index.xml`; follows bounded same-origin sitemap indexes and samples candidates. |
 | `seo.sitemap_freshness` | 1 bonus | Not applicable without a valid URL set. Pass when at least 80% of the first up-to-500 entries have valid `lastmod` and the newest is under 90 days old; otherwise no bonus. | A truthful lastmod value is not independently verified against page content. |
 | `agent.content_budget` | 1 | Recommended. Pass for an estimated main-text size at or below 15,000 tokens; partial from 15,001 to 30,000; fail above 30,000; unknown when page HTML is unavailable. | Estimate is visible text bytes divided by four, using `<main>` where present and the whole initial text as fallback. It is not a model tokenizer. |
@@ -96,7 +106,7 @@ This inventory and fixture results are review evidence for the MVP, not empirica
 
 The scanner fetches the homepage and up to 31 additional same-origin HTML pages selected from homepage links and a bounded sitemap candidate set. It distributes selection across path families where possible, then fills unused slots from one additional link hop. It does not recursively crawl child pages. Page fetches use up to eight per-scan workers; a shared per-instance outbound-request limiter and four scan workers add separate bounds. These are provisional code limits, not measured e2-micro capacity. Robots policy is checked before each content fetch, including redirects. Missing robots (404/410) permits fetching; unavailable, malformed, or denying policies leave content unobserved. Child redirects remain on the final homepage origin. Policies use matching user-agent groups, longest matching path rules, wildcard/end markers, and allow precedence on ties.
 
-Limits are 64 requests including redirects, 24 discovery requests including robots and sitemap documents, 5 redirects per fetch, 5 seconds per request, 60 seconds overall, 2 MiB decoded response bodies, 12 MiB aggregate decoded bytes reserved during concurrent reads, 50,000 HTML tokens, and a nesting guard of 512. No target URL may exceed 2,048 bytes. Findings retain bounded text evidence, generally 300 characters; the per-bot matrix is capped at 600 characters. Response bodies and HTML trees are not retained. Before durable storage, finding URLs that point to listed report pages are represented by page indexes to avoid repeating long URLs in every finding; HTML and PDF resolve those references back to the same page URLs. The store independently enforces an 850,000-byte record ceiling.
+Limits are 64 requests including redirects, 32 discovery requests including robots, sitemap documents and bounded linked-resource probes, 5 redirects per fetch, 5 seconds per request, 60 seconds overall, 2 MiB decoded response bodies, 12 MiB aggregate decoded bytes reserved during concurrent reads, 50,000 HTML tokens, and a nesting guard of 512. No target URL may exceed 2,048 bytes. Findings retain bounded text evidence, generally 300 characters; the per-bot matrix is capped at 600 characters. Response bodies and HTML trees are not retained. Before durable storage, finding URLs that point to listed report pages are represented by page indexes to avoid repeating long URLs in every finding; HTML and PDF resolve those references back to the same page URLs. The store independently enforces an 850,000-byte record ceiling.
 
 The transport resolves all destination addresses, rejects non-public/mixed public-private answers, and dials an exact validated address while HTTP/TLS retains the requested hostname. It uses no environment proxy. Reserved IPv4, IPv6, mapped addresses, metadata, link-local and transition-prefix cases are covered by focused tests. This is read-only source/test evidence, not a deployed penetration test.
 

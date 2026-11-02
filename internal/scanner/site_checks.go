@@ -8,6 +8,7 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -29,9 +30,12 @@ func siteAgentChecks(ss *session, home *url.URL, homepage response, homepagePage
 			{ID: "geo.organization", Pillar: "geo", Title: "Organization schema completeness", Status: "unknown", Weight: 2, Tier: "recommended", URL: origin(home) + "/", Evidence: "Homepage response unavailable; structured identity was not evaluated."},
 			{ID: "geo.entity_links", Pillar: "geo", Title: "Structured entity links", Status: "unknown", Weight: 1, Tier: "recommended", URL: origin(home) + "/", Evidence: "Homepage response unavailable; sameAs links were not evaluated."},
 			{ID: "geo.schema_breadth", Pillar: "geo", Title: "Structured data type breadth", Status: "not_applicable", Weight: 1, Tier: "bonus", URL: origin(home) + "/", Evidence: "Homepage response unavailable; structured-data types were not evaluated."},
+			{ID: "agent.instructions.quality", Pillar: "agent", Title: "llms.txt quality", Status: "unknown", Weight: 1, Tier: "recommended", URL: origin(home) + "/llms.txt", Evidence: "Homepage response unavailable; agent instructions were not probed."},
+			{ID: "agent.instructions.when_to_use", Pillar: "agent", Title: "Agent when-to-use guidance", Status: "unknown", Weight: 1, Tier: "recommended", URL: origin(home) + "/llms.txt", Evidence: "Homepage response unavailable; agent instructions were not probed."},
+			{ID: "agent.instructions.full", Pillar: "agent", Title: "Full agent reference file", Status: "unknown", URL: origin(home) + "/llms-full.txt", Evidence: "Homepage response unavailable; agent reference was not probed."},
 		}
 	}
-	results := make(chan reportmodel.Finding, 11)
+	results := make(chan reportmodel.Finding, 14)
 	go func() { results <- markdownNegotiationCheck(ss, home, homepage) }()
 	go func() { results <- markdownNotFoundCheck(ss, home) }()
 	go func() { results <- aiCrawlerAccessCheck(ss, home, homepage) }()
@@ -44,12 +48,164 @@ func siteAgentChecks(ss *session, home *url.URL, homepage response, homepagePage
 		schemaFinding := schemaFinding
 		go func() { results <- schemaFinding }()
 	}
-	out := make([]reportmodel.Finding, 0, 11)
+	go func() {
+		for _, f := range agentInstructionChecks(ss, home) {
+			results <- f
+		}
+	}()
+	out := make([]reportmodel.Finding, 0, 14)
 	for i := 0; i < cap(results); i++ {
 		out = append(out, <-results)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
+}
+
+var markdownLinkPattern = regexp.MustCompile(`\[[^\]]+\]\(([^)]+)\)`)
+
+type llmsAssessment struct {
+	hasHeading, hasSummary, withinBudget, balancedFences bool
+	hasWhenToUse, hasLinks                               bool
+	links                                                []string
+}
+
+func assessLLMSText(body string) llmsAssessment {
+	assessment := llmsAssessment{}
+	content := strings.TrimSpace(body)
+	lines := strings.Split(content, "\n")
+	if len(lines) > 0 {
+		for _, line := range lines {
+			if strings.TrimSpace(line) != "" {
+				assessment.hasHeading = strings.HasPrefix(strings.TrimSpace(line), "# ")
+				break
+			}
+		}
+	}
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		assessment.hasSummary = assessment.hasSummary || strings.HasPrefix(line, ">")
+		lower := strings.ToLower(line)
+		if strings.Contains(lower, "when to use this") || strings.Contains(lower, "when to use") || strings.Contains(lower, "use this when") {
+			assessment.hasWhenToUse = true
+		}
+	}
+	assessment.withinBudget = len(body) <= 30000
+	assessment.balancedFences = strings.Count(content, "```")%2 == 0
+	for _, match := range markdownLinkPattern.FindAllStringSubmatch(body, 20) {
+		raw := strings.TrimSpace(match[1])
+		u, err := url.Parse(raw)
+		if err != nil || raw == "" || strings.HasPrefix(raw, "#") || (u.Scheme != "" && u.Scheme != "http" && u.Scheme != "https") {
+			continue
+		}
+		assessment.links = append(assessment.links, match)
+	}
+	assessment.hasLinks = len(assessment.links) > 0
+	return assessment
+}
+
+func agentInstructionChecks(ss *session, home *url.URL) []reportmodel.Finding {
+	quality := reportmodel.Finding{ID: "agent.instructions.quality", Pillar: "agent", Title: "llms.txt quality", Status: "unknown", Weight: 1, Tier: "recommended", Stage: "read", URL: origin(home) + "/llms.txt", Applicability: "Assesses public agent-readable guidance when the site publishes llms.txt.", Remediation: "Publish a concise Markdown llms.txt with an H1, a short summary, a when-to-use section, and working links to authoritative site resources."}
+	when := reportmodel.Finding{ID: "agent.instructions.when_to_use", Pillar: "agent", Title: "Agent when-to-use guidance", Status: "unknown", Weight: 1, Tier: "recommended", Stage: "read", URL: quality.URL, Applicability: "Relevant when the site publishes instructions intended for agent readers.", Remediation: "Add a specific when-to-use section that names best-fit tasks and links to the resources needed to complete them."}
+	full := reportmodel.Finding{ID: "agent.instructions.full", Pillar: "agent", Title: "Full agent reference file", Status: "information", Stage: "read", URL: origin(home) + "/llms-full.txt", Applicability: "Optional longer reference file; presence alone does not establish quality.", Remediation: "If useful, publish a maintained full reference at /llms-full.txt."}
+	type fetchResult struct {
+		path string
+		resp response
+		err  error
+	}
+	files := make(chan fetchResult, 2)
+	for _, path := range []string{"/llms.txt", "/llms-full.txt"} {
+		path := path
+		go func() {
+			r, err := ss.probe(origin(home)+path, origin(home))
+			files <- fetchResult{path: path, resp: r, err: err}
+		}()
+	}
+	var llms response
+	llmsUnavailable := false
+	for range 2 {
+		result := <-files
+		if result.path == "/llms-full.txt" {
+			if result.err != nil {
+				full.Evidence = "Full reference probe not observed: " + result.err.Error()
+			} else if result.resp.code == http.StatusOK && !looksLikeHTML(result.resp.body) {
+				full.Evidence = fmt.Sprintf("HTTP %d; %d body bytes observed", result.resp.code, len(result.resp.body))
+			} else {
+				full.Evidence = fmt.Sprintf("HTTP %d; optional full reference not found as text", result.resp.code)
+			}
+			continue
+		}
+		if result.err != nil {
+			quality.Evidence = "llms.txt not observed: " + result.err.Error()
+			when.Evidence = quality.Evidence
+			llmsUnavailable = true
+			continue
+		}
+		llms = result.resp
+	}
+	if llmsUnavailable {
+		quality.Status, when.Status = "unknown", "unknown"
+		return []reportmodel.Finding{quality, when, full}
+	}
+	if llms.code != http.StatusOK || looksLikeHTML(llms.body) {
+		quality.Status, when.Status = "fail", "fail"
+		if quality.Evidence == "" {
+			quality.Evidence = fmt.Sprintf("/llms.txt returned HTTP %d or HTML instead of a text/Markdown guide", llms.code)
+		}
+		when.Evidence = "No usable /llms.txt guidance was observed."
+		return []reportmodel.Finding{quality, when, full}
+	}
+	assessment := assessLLMSText(string(llms.body))
+	resolved := 0
+	links := assessment.links
+	if len(links) > 5 {
+		links = links[:5]
+	}
+	linkResults := make(chan bool, len(links))
+	for _, link := range links {
+		raw := strings.TrimSpace(link[1])
+		go func(raw string) {
+			u, err := url.Parse(raw)
+			if err != nil || u.User != nil || u.RawQuery != "" {
+				linkResults <- false
+				return
+			}
+			u.Fragment = ""
+			u.RawFragment = ""
+			u = home.ResolveReference(u)
+			if validateURL(u) != nil {
+				linkResults <- false
+				return
+			}
+			var r response
+			if origin(u) == origin(home) {
+				r, err = ss.probe(u.String(), origin(home))
+			} else {
+				r, err = ss.probeExternal(u.String())
+			}
+			linkResults <- err == nil && r.code >= 200 && r.code < 400
+		}(raw)
+	}
+	for range len(links) {
+		if <-linkResults {
+			resolved++
+		}
+	}
+	baseOK := assessment.hasHeading && assessment.hasSummary && assessment.withinBudget && assessment.balancedFences && assessment.hasLinks && resolved*5 >= len(links)*4
+	quality.Evidence = fmt.Sprintf("H1=%t, quoted summary=%t, %d characters (30,000 max), balanced fences=%t; %d/%d sampled Markdown links resolved", assessment.hasHeading, assessment.hasSummary, len(llms.body), assessment.balancedFences, resolved, len(links))
+	if baseOK {
+		quality.Status = "pass"
+	} else if assessment.hasHeading || assessment.hasSummary || assessment.hasLinks {
+		quality.Status = "partial"
+	} else {
+		quality.Status = "fail"
+	}
+	when.Status = "fail"
+	when.Evidence = "No specific when-to-use section observed."
+	if assessment.hasWhenToUse {
+		when.Status = "pass"
+		when.Evidence = "A when-to-use section was observed in llms.txt; task fit was not independently judged."
+	}
+	return []reportmodel.Finding{quality, when, full}
 }
 
 func schemaChecks(home *url.URL, homepage pageResult) []reportmodel.Finding {
