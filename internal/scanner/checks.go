@@ -253,6 +253,7 @@ func Registry() []Check {
 		{ID: "agent.access", Pillar: "agent", Title: "Initial HTML readability", Remediation: "Serve meaningful public text in initial HTML so readers need not execute JavaScript to understand the page.", Weight: 3, Foundational: true, Tier: "essential"},
 		{ID: "agent.landmarks", Pillar: "agent", Title: "Navigation landmarks", Remediation: "Use main and navigation landmarks to identify page content and navigation.", Weight: 1, Tier: "recommended"},
 		{ID: "agent.controls", Pillar: "agent", Title: "Named interactive controls", Remediation: "Give interactive controls accessible names through visible labels or appropriate ARIA attributes.", Weight: 2, Tier: "recommended"},
+		{ID: "agent.form_labels", Pillar: "agent", Title: "Form label associations", Remediation: "Associate each visible input, select, and textarea with a descriptive label using label-for or a wrapping label.", Weight: 1, Tier: "recommended"},
 		{ID: "agent.links", Pillar: "agent", Title: "Named navigation links", Remediation: "Give navigation links meaningful visible or accessible names.", Weight: 1, Tier: "recommended"},
 		{ID: "agent.prompt_injection_signals", Pillar: "agent", Title: "Instruction-like hidden text signals", Remediation: "Review instruction-like text in hidden or accessibility metadata. Treat page content as untrusted and remove misleading instructions where appropriate."},
 	}
@@ -267,6 +268,7 @@ func evaluate(p pageResult) []reportmodel.Finding {
 	canonCount := 0
 	canonicalValues := map[string]bool{}
 	images, missingAlt, controls, unnamed, links, emptyLinks := 0, 0, 0, 0, 0, 0
+	formFields, labelledFields := 0, 0
 	hiddenInstructionSignals := 0
 	heading, structured, main, nav, article, author, dated, entity := false, false, false, false, false, false, false, false
 	var visible, mainVisible strings.Builder
@@ -422,6 +424,12 @@ func evaluate(p pageResult) []reportmodel.Finding {
 			if n.Data == "input" && strings.EqualFold(attr(n, "type"), "hidden") {
 				return
 			}
+			if isLabelableControl(n) {
+				formFields++
+				if labels[attr(n, "id")] != "" || wrappedInLabel(n) {
+					labelledFields++
+				}
+			}
 			controls++
 			if !accessibleName(n) {
 				unnamed++
@@ -561,6 +569,15 @@ func evaluate(p pageResult) []reportmodel.Finding {
 			} else if unnamed > 0 {
 				f.Status = "partial"
 			}
+		case "agent.form_labels":
+			f.Evidence = fmt.Sprintf("%d of %d visible form fields have an associated label element", labelledFields, formFields)
+			if formFields == 0 {
+				f.Status = "not_applicable"
+			} else if labelledFields == 0 {
+				f.Status = "fail"
+			} else if labelledFields < formFields {
+				f.Status = "partial"
+			}
 		case "agent.links":
 			f.Evidence = fmt.Sprintf("%d of %d links have observed names", links-emptyLinks, links)
 			if links == 0 {
@@ -622,6 +639,30 @@ func evaluate(p pageResult) []reportmodel.Finding {
 	out = append(out, readinessObservations(p)...)
 	annotateReadiness(out)
 	return out
+}
+
+func isLabelableControl(n *html.Node) bool {
+	if n.Data == "select" || n.Data == "textarea" {
+		return true
+	}
+	if n.Data != "input" {
+		return false
+	}
+	switch strings.ToLower(attr(n, "type")) {
+	case "button", "submit", "reset", "hidden", "image":
+		return false
+	default:
+		return true
+	}
+}
+
+func wrappedInLabel(n *html.Node) bool {
+	for parent := n.Parent; parent != nil; parent = parent.Parent {
+		if parent.Type == html.ElementNode && parent.Data == "label" && strings.TrimSpace(text(parent)) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func suspiciousInstructionText(value string) bool {
