@@ -158,7 +158,7 @@ func TestReadinessAddsNoInterfaceRequestsAndRecordsNotRun(t *testing.T) {
 			t.Fatalf("discovery declaration caused network request: %s", request)
 		}
 	}
-	if report.BehavioralEvaluation != "not_run" || report.MethodologyVersion != "2026-10-agentready-v3" {
+	if report.BehavioralEvaluation != "not_run" || report.MethodologyVersion != MethodologyVersion {
 		t.Fatalf("new methodology/task provenance missing: %+v", report)
 	}
 	if report.SelectionPolicy != "home-links-sitemap-two-hop-v2" {
