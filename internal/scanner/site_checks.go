@@ -97,7 +97,7 @@ func assessLLMSText(body string) llmsAssessment {
 		if err != nil || raw == "" || strings.HasPrefix(raw, "#") || (u.Scheme != "" && u.Scheme != "http" && u.Scheme != "https") {
 			continue
 		}
-		assessment.links = append(assessment.links, match)
+		assessment.links = append(assessment.links, raw)
 	}
 	assessment.hasLinks = len(assessment.links) > 0
 	return assessment
@@ -162,7 +162,7 @@ func agentInstructionChecks(ss *session, home *url.URL) []reportmodel.Finding {
 	}
 	linkResults := make(chan bool, len(links))
 	for _, link := range links {
-		raw := strings.TrimSpace(link[1])
+		raw := strings.TrimSpace(link)
 		go func(raw string) {
 			u, err := url.Parse(raw)
 			if err != nil || u.User != nil || u.RawQuery != "" {
