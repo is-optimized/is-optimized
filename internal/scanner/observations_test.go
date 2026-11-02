@@ -69,6 +69,37 @@ func TestContentBudgetAndTextRatioStatuses(t *testing.T) {
 	}
 }
 
+func TestRedirectHygieneDetectsRefreshStubsAndChains(t *testing.T) {
+	for _, tc := range []struct {
+		name, url, body string
+		redirects       int
+		want            string
+	}{
+		{name: "clean", url: "https://example.com/", body: `<main><h1>Page</h1><p>Useful content.</p></main>`, want: "pass"},
+		{name: "meta refresh", url: "https://example.com/", body: `<meta http-equiv="refresh" content="0;url=/next"><main>Content</main>`, want: "fail"},
+		{name: "short javascript stub", url: "https://example.com/", body: `<script>location.replace('/next')</script><p>Go</p>`, want: "fail"},
+		{name: "long page with script", url: "https://example.com/", body: `<script>location.href='/next'</script><main>` + strings.Repeat("useful ", 220) + `</main>`, want: "pass"},
+		{name: "long redirect chain", url: "https://example.com/", body: `<main>Content</main>`, redirects: 3, want: "fail"},
+		{name: "https downgrade", url: "http://example.com/", body: `<main>Content</main>`, want: "fail"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := observed(t, tc.url, tc.body)
+			p.page.RedirectCount = tc.redirects
+			for _, finding := range evaluate(p) {
+				if finding.ID == "seo.redirect_hygiene" && finding.Status != tc.want {
+					t.Fatalf("status=%q want %q evidence=%s", finding.Status, tc.want, finding.Evidence)
+				}
+			}
+		})
+	}
+	p := analyze(response{}, errors.New("unavailable"), "https://example.com/", 0)
+	for _, finding := range evaluate(p) {
+		if finding.ID == "seo.redirect_hygiene" && finding.Status != "unknown" {
+			t.Fatalf("unobserved redirect behavior scored: %+v", finding)
+		}
+	}
+}
+
 func TestArticleAttributionApplicabilityRequiresArticleEvidence(t *testing.T) {
 	cases := []struct {
 		name, body, want string

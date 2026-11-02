@@ -49,7 +49,7 @@ func TestBoundedDepthAndConcurrency(t *testing.T) {
 		if r.URL.Path == "/" {
 			return reply(r, 200, home.String(), "text/html"), nil
 		}
-		if !strings.HasPrefix(r.URL.Path, "/p") && r.URL.Path != "/deep" {
+		if !strings.HasPrefix(r.URL.Path, "/p") || len(r.URL.Path) <= 2 || r.URL.Path[2] < '0' || r.URL.Path[2] > '9' {
 			return reply(r, 404, "Not found", "text/plain"), nil
 		}
 		n := active.Add(1)
@@ -117,7 +117,7 @@ func TestScanPageCapAndConcurrencyBound(t *testing.T) {
 			}
 			return reply(r, 200, links.String(), "text/html"), nil
 		}
-		if !strings.HasPrefix(r.URL.Path, "/p") {
+		if !strings.HasPrefix(r.URL.Path, "/p") || len(r.URL.Path) <= 2 || r.URL.Path[2] < '0' || r.URL.Path[2] > '9' {
 			return reply(r, 404, "Not found", "text/plain"), nil
 		}
 		n := active.Add(1)
