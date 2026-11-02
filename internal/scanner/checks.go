@@ -320,7 +320,7 @@ func evaluate(p pageResult) []reportmodel.Finding {
 			skip := false
 			inMain := false
 			for a := n.Parent; a != nil; a = a.Parent {
-				if a.Data == "script" || a.Data == "style" || a.Data == "head" || a.Data == "template" || strings.EqualFold(attr(a, "aria-hidden"), "true") || strings.Contains(strings.ToLower(attr(a, "style")), "display:none") {
+				if a.Data == "script" || a.Data == "style" || a.Data == "head" || a.Data == "template" || strings.EqualFold(attr(a, "aria-hidden"), "true") || hiddenByInlineStyle(attr(a, "style")) {
 					skip = true
 				}
 				for _, aAttr := range a.Attr {
@@ -654,6 +654,14 @@ func isLabelableControl(n *html.Node) bool {
 	default:
 		return true
 	}
+}
+
+func hiddenByInlineStyle(style string) bool {
+	style = strings.ToLower(strings.Join(strings.Fields(style), ""))
+	if strings.Contains(style, "display:none") || strings.Contains(style, "visibility:hidden") || strings.Contains(style, "opacity:0") {
+		return true
+	}
+	return strings.Contains(style, "position:absolute") && (strings.Contains(style, "left:-9999px") || strings.Contains(style, "left:-10000px") || strings.Contains(style, "top:-9999px") || strings.Contains(style, "top:-10000px"))
 }
 
 func wrappedInLabel(n *html.Node) bool {
