@@ -58,6 +58,10 @@ func openAPIChecks(ss *session, home *url.URL, homepage response, page pageResul
 		}
 		if r.code != http.StatusOK {
 			lastEvidence = fmt.Sprintf("%s returned HTTP %d", candidate.Path, r.code)
+			if r.code >= http.StatusInternalServerError {
+				lastErr = fmt.Errorf("server error response")
+				lastEvidence = fmt.Sprintf("OpenAPI document was not observed: %s returned HTTP %d", candidate.Path, r.code)
+			}
 			continue
 		}
 		decoded, _, err = decodeOpenAPI(r.body)

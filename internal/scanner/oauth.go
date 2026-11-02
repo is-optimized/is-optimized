@@ -39,6 +39,10 @@ func oauthChecks(ss *session, home *url.URL, page pageResult) []reportmodel.Find
 		}
 		if r.code != http.StatusOK {
 			evidence = fmt.Sprintf("%s returned HTTP %d", path, r.code)
+			if r.code >= http.StatusInternalServerError {
+				lastErr = fmt.Errorf("server error response")
+				evidence = fmt.Sprintf("OAuth/OIDC metadata was not observed: %s returned HTTP %d", path, r.code)
+			}
 			continue
 		}
 		var metadata map[string]any
@@ -157,7 +161,7 @@ func oauthResourceFinding(ss *session, home *url.URL, applicable bool, note *str
 	}
 	raw := origin(home) + "/.well-known/oauth-protected-resource"
 	f.URL = raw
-	r, err := ss.probe(raw, ss.origin)
+	r, err := ss.probe(raw, origin(home))
 	if err != nil {
 		f.Evidence = "Protected-resource metadata was not observed: " + err.Error()
 		return f

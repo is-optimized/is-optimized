@@ -111,3 +111,27 @@ func TestScannerParsesLinkedOpenAPIContract(t *testing.T) {
 		}
 	}
 }
+
+func TestScannerTreatsOpenAPIServerErrorsAsUnobserved(t *testing.T) {
+	s := fixtureScanner(func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Path {
+		case "/robots.txt":
+			return reply(r, http.StatusNotFound, "", "text/plain"), nil
+		case "/":
+			return reply(r, http.StatusOK, `<title>Example</title><main><h1>Example</h1><a href="/docs/api">API docs</a></main>`, "text/html"), nil
+		case "/openapi.json", "/openapi.yaml", "/swagger.json", "/api/openapi.json":
+			return reply(r, http.StatusServiceUnavailable, "temporarily unavailable", "text/plain"), nil
+		default:
+			return reply(r, http.StatusNotFound, "Not found", "text/plain"), nil
+		}
+	})
+	report, err := s.Scan(context.Background(), "example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range report.Findings {
+		if strings.HasPrefix(finding.ID, "agent.openapi.") && finding.Status != "unknown" {
+			t.Errorf("server error must not be scored as a site defect: %+v", finding)
+		}
+	}
+}
