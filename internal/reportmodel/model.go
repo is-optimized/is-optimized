@@ -4,16 +4,17 @@ package reportmodel
 import "time"
 
 type Report struct {
-	ID                   string    `json:"id"`
-	Domain               string    `json:"domain"`
-	StartedAt            time.Time `json:"started_at"`
-	CompletedAt          time.Time `json:"completed_at"`
-	MethodologyVersion   string    `json:"methodology_version"`
-	SelectionPolicy      string    `json:"selection_policy"`
-	BehavioralEvaluation string    `json:"behavioral_evaluation,omitempty"`
-	Pages                []Page    `json:"pages"`
-	Findings             []Finding `json:"findings"`
-	Pillars              []Pillar  `json:"pillars"`
+	ID                   string                 `json:"id"`
+	Domain               string                 `json:"domain"`
+	StartedAt            time.Time              `json:"started_at"`
+	CompletedAt          time.Time              `json:"completed_at"`
+	MethodologyVersion   string                 `json:"methodology_version"`
+	SelectionPolicy      string                 `json:"selection_policy"`
+	BehavioralEvaluation string                 `json:"behavioral_evaluation,omitempty"`
+	Pages                []Page                 `json:"pages"`
+	Findings             []Finding              `json:"findings"`
+	Pillars              []Pillar               `json:"pillars"`
+	AgentReadiness       *AgentReadinessSummary `json:"agent_readiness,omitempty"`
 }
 type Page struct {
 	RequestedURL string `json:"requested_url,omitempty"`
@@ -32,11 +33,28 @@ type Finding struct {
 	Evidence      string              `json:"evidence"`
 	Remediation   string              `json:"remediation"`
 	Weight        float64             `json:"weight"`
+	Tier          string              `json:"readiness_tier,omitempty"`
 	Foundational  bool                `json:"foundational"`
 	Stage         string              `json:"stage,omitempty"`
 	EvidenceLevel string              `json:"evidence_level,omitempty"`
 	Applicability string              `json:"applicability,omitempty"`
 	Standards     []StandardReference `json:"standards,omitempty"`
+}
+
+type ReadinessTierSummary struct {
+	Earned    float64 `json:"earned"`
+	Available float64 `json:"available"`
+	Passing   int     `json:"passing"`
+	Total     int     `json:"total"`
+}
+
+type AgentReadinessSummary struct {
+	ScoreLabel      string               `json:"score_label,omitempty"`
+	Coverage        float64              `json:"coverage"`
+	Essential       ReadinessTierSummary `json:"essential"`
+	Recommended     ReadinessTierSummary `json:"recommended"`
+	BonusPoints     float64              `json:"bonus_points"`
+	PositiveSignals int                  `json:"positive_signals"`
 }
 
 // StandardReference describes the relationship of an observation to a practice.

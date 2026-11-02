@@ -95,3 +95,28 @@ func TestEmptyReportDoesNotImplyReadinessAndLinksRemainEscaped(t *testing.T) {
 		t.Fatal("new affected-page links/evidence bypassed escaping")
 	}
 }
+
+func TestTieredFindingsAreAlsoShownUnderAgentReadiness(t *testing.T) {
+	zero := 0.0
+	r := reportmodel.Report{
+		Pillars: []reportmodel.Pillar{{ID: "seo", Name: "SEO", Score: &zero}, {ID: "agent_readiness", Name: "Agent readiness", Score: &zero}},
+		Findings: []reportmodel.Finding{
+			{ID: "seo.title", Pillar: "seo", Tier: "essential", Status: "fail", Title: "Page title"},
+			{ID: "agent.mcp", Pillar: "agent", Tier: "recommended", Status: "pass", Title: "MCP discovery"},
+			{ID: "geo.extra", Pillar: "geo", Status: "fail", Title: "Non-tiered finding"},
+		},
+	}
+	v := summarize(r)
+	var agent *pillarSummary
+	for i := range v.Pillars {
+		if v.Pillars[i].ID == "agent_readiness" {
+			agent = &v.Pillars[i]
+		}
+	}
+	if agent == nil || agent.Score == nil || len(agent.Findings) != 2 || agent.Counts.Total != 2 {
+		t.Fatal("agent readiness card lacks its source evidence", agent)
+	}
+	if agent.Findings[0].ID != "seo.title" || agent.Findings[1].ID != "agent.mcp" {
+		t.Fatal("tiered source findings were not preserved", agent.Findings)
+	}
+}

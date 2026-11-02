@@ -251,7 +251,15 @@ func PDF(r reportmodel.Report) ([]byte, error) {
 	}
 	p.SetTextColor(22, 26, 23)
 	p.SetFont("Go", "", 10)
-	line("Bars show unweighted check counts, not score contributions. No composite score or external ranking is calculated.")
+	line("SEO, GEO, and AEO remain independent scores. Agent readiness adds Essential and Recommended points plus up to five positive Bonus points; unknown checks lower coverage rather than count as failures.")
+	if view.AgentReadiness != nil {
+		a := view.AgentReadiness
+		label := a.ScoreLabel
+		if label == "" {
+			label = "Insufficient evidence"
+		}
+		line(fmt.Sprintf("Agent readiness: %s · Essential %.1f/%.0f (%d/%d passing) · Recommended %.1f/%.0f (%d/%d passing) · Bonus +%.1f · coverage %.0f%%.", label, a.Essential.Earned, a.Essential.Available, a.Essential.Passing, a.Essential.Total, a.Recommended.Earned, a.Recommended.Available, a.Recommended.Passing, a.Recommended.Total, a.BonusPoints, 100*a.Coverage))
+	}
 	line("Scores describe observed technical signals, not rankings, AI citations, revenue, or successful AI tasks. Coverage is the share of applicable evidence we could check. Insufficient evidence is not a zero.")
 	line("Find: discover useful pages. Read: extract their information. Act: discover a declared interface; a link alone does not prove it works.")
 	line(taskEvaluationLabel(r.BehavioralEvaluation) + ". Static checks do not authenticate or complete tasks.")

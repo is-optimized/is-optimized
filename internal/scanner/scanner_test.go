@@ -299,6 +299,38 @@ func TestScoreCoverageAndApplicability(t *testing.T) {
 		t.Fatal("insufficient coverage scored")
 	}
 }
+
+func TestAgentReadinessTierScoreAndCoverage(t *testing.T) {
+	findings := []reportmodel.Finding{
+		{Tier: "essential", Weight: 2, Status: "pass"},
+		{Tier: "essential", Weight: 2, Status: "fail"},
+		{Tier: "essential", Weight: 1, Status: "unknown"},
+		{Tier: "recommended", Weight: 2, Status: "pass"},
+		{Tier: "recommended", Weight: 50, Status: "not_applicable"},
+		{Tier: "bonus", Weight: 10, Status: "pass"},
+		{Tier: "bonus", Weight: 1, Status: "partial"},
+	}
+	pillar, summary := scoreAgentReadiness(findings)
+	if pillar.Score == nil || *pillar.Score != 65 || pillar.Coverage < .85 || pillar.Coverage > .86 {
+		t.Fatalf("pillar=%+v summary=%+v", pillar, summary)
+	}
+	if summary.Essential.Earned != 40 || summary.Recommended.Earned != 20 || summary.BonusPoints != 5 || summary.PositiveSignals != 2 || summary.ScoreLabel != "Important blockers remain" {
+		t.Fatalf("summary=%+v", summary)
+	}
+
+	findings[2].Status = "not_applicable"
+	pillar, summary = scoreAgentReadiness(findings)
+	if pillar.Score == nil || summary.Coverage != 1 {
+		t.Fatalf("not-applicable evidence affected coverage: pillar=%+v summary=%+v", pillar, summary)
+	}
+	findings[2].Status = "unknown"
+	findings[2].Weight = 2
+	pillar, _ = scoreAgentReadiness(findings)
+	if pillar.Score != nil {
+		t.Fatalf("score should be withheld below 80%% evidence coverage: %+v", pillar)
+	}
+}
+
 func TestRedirectPrivateRejectedBeforeTransport(t *testing.T) {
 	calls := 0
 	s := fixtureScanner(func(r *http.Request) (*http.Response, error) {

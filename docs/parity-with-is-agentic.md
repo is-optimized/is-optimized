@@ -136,14 +136,15 @@ verification of this candidate.
 
 ## Shared scoring and evidence work
 
-The current public score model has SEO, GEO, and AI-agent readiness pillars.
-Pillar scores are withheld below 80% observed coverage or when foundational
-evidence is unknown. Optional interface discovery currently has zero weight.
-The requested work must decide which checks are Essential, Recommended, or
-Bonus; preserve `unknown` vs `not_applicable`; avoid rewarding unobserved
-weight-zero checks; and make one computed result feed the JSON API, HTML/PDF,
-and developer brief. The proposed fourth/agent-readiness score and its
-applicability-aware denominator are not implemented by this inventory commit.
+The existing SEO, GEO, and AEO scores remain separate. This branch adds an
+additive Agent readiness score with an 80-point Essential pool, 20-point
+Recommended pool, and non-penalty Bonus capped at +5 (final score capped at
+100). Unknown results reduce coverage but are not counted as failures; not
+applicable results leave the denominator. The score is withheld below 80%
+coverage or until both scored tiers have observed findings. Current weighted
+page checks now carry Essential/Recommended tiers and feed this score; site
+level P0 checks, per-tier calibration, and live candidate comparisons remain
+in progress.
 
 All new findings must keep stable IDs, pillar/stage, weight and applicability,
 proportional verdicts, bounded evidence, remediation examples, and any

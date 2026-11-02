@@ -20,7 +20,7 @@ import (
 	"github.com/is-optimized/is-optimized/internal/reportmodel"
 )
 
-const MethodologyVersion = "2026-11-agentready-v1"
+const MethodologyVersion = "2026-11-agentready-v2"
 const maxBody = 2 << 20
 const maxContentPages = 32
 const maxRequestCount = 64
@@ -313,6 +313,8 @@ func (s *Scanner) Scan(ctx context.Context, domain string) (reportmodel.Report, 
 	report.Findings = markDuplicates(report.Findings, pages)
 	annotateReadiness(report.Findings)
 	report.Pillars = score(report.Findings)
+	_, readinessSummary := scoreAgentReadiness(report.Findings)
+	report.AgentReadiness = &readinessSummary
 	report.CompletedAt = time.Now().UTC()
 	failedPages := 0
 	for _, page := range report.Pages {
