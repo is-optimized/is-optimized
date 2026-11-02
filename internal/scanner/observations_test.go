@@ -141,6 +141,29 @@ func TestPromptInjectionSignalsAreInformationalAndDoNotExposeText(t *testing.T) 
 	t.Fatal("prompt-injection observation missing")
 }
 
+func TestFormLabelAssociations(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, want string
+	}{
+		{name: "associated labels", body: `<label for="email">Email</label><input id="email"><label>Search<input></label>`, want: "pass"},
+		{name: "partial labels", body: `<label for="email">Email</label><input id="email"><textarea></textarea>`, want: "partial"},
+		{name: "no labels", body: `<input id="email"><select></select>`, want: "fail"},
+		{name: "no form fields", body: `<button>Continue</button>`, want: "not_applicable"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, f := range evaluate(observed(t, "https://example.com/", tc.body)) {
+				if f.ID == "agent.form_labels" {
+					if f.Status != tc.want {
+						t.Fatalf("label status=%q, want %q (%s)", f.Status, tc.want, f.Evidence)
+					}
+					return
+				}
+			}
+			t.Fatal("form labels finding missing")
+		})
+	}
+}
+
 func TestDuplicateMetadataAndRedirectAliases(t *testing.T) {
 	a := observed(t, "https://example.com/", `<title>Same TITLE</title><meta name="description" content=" Same text ">`)
 	b := observed(t, "https://example.com/about", `<title>same title</title><meta name="description" content="same text">`)

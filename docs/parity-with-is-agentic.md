@@ -63,13 +63,13 @@ deliberate: an existing related heuristic is not treated as equivalent coverage.
 | Is-agentic topic | Planned stable check ID | Existing mapping | State / boundary |
 | --- | --- | --- | --- |
 | Robots directives for named AI crawlers and `Content-Signal` | `agent.robots` | `seo.index` (partial) | Implemented partially: reports specified/unspecified rules and Content-Signal, plus four retrieval-UA status/body-size probes; challenge detection is heuristic and policy matrix is not full protocol certification. |
-| Retrieval-agent vs browser response parity | `agent.retrieval_access` | `agent.access` (partial) | Pending; bounded read-only GET probes; compare status and body length. |
+| Retrieval-agent vs browser response parity | `agent.robots` | `agent.access` (partial) | Implemented inside the named crawler policy check: compares four retrieval user agents against the normal homepage status and response byte length; not a semantic body comparison. |
 | Sitemap validity, same-host URLs, sample freshness | `seo.sitemap_quality`, `seo.sitemap_freshness` | `seo.sitemap` (partial) | Implemented with robots-declared then conventional-path fallbacks; up to five sitemap documents and 5,000 candidate URLs, freshness sampled over up to 500 entries. |
-| Markdown negotiation, fallback files, alternate links and format quality | `agent.markdown` | None | Implemented partially: homepage Accept probe, Vary check, `/index.md` fallback; frontmatter, code fences, and alternate-link target validation remain. |
+| Markdown negotiation, fallback files, alternate links and format quality | `agent.markdown` | None | Implemented partially: homepage Accept probe, `Vary` check, HTML response and `/index.md` fallback; page-specific `.md` routes, alternate-link target validation, frontmatter and code-fence validation remain. |
 | HTML and Markdown error routes | `agent.markdown_404` | None | Implemented: unique-path HTML/Markdown GET probes; validates 404/410, Markdown media type, minimum body length, and link syntax, but not link destination. |
 | Refresh/script redirect stubs, chains and host/scheme consistency | `seo.redirect_hygiene` | `seo.page_status` (partial) | Implemented partially: checks meta refresh, short-page location stubs, recorded chain length, and HTTPS downgrade; no final cross-page apex/www consistency analysis. |
 | Open Graph, Twitter card, language and resolved image | `seo.social_metadata` | `seo.canonical` (partial) | Implemented for eight homepage signals; image is fetched through the SSRF-safe shared budget; no visual preview-quality judgment. |
-| About/contact/privacy/terms trust pages | `geo.trust.*` | `agent.find.docs` (partial) | Implemented partially: probes four same-origin pages and checks 500 visible-text bytes; one standard route per topic, no legal/claim assessment. |
+| About/contact/privacy/terms trust pages | `geo.trust.about`, `geo.trust.contact`, `geo.trust.privacy`, `geo.trust.terms` | `agent.find.docs` (partial) | Implemented partially: probes four same-origin pages and checks 500 visible-text bytes; one standard route per topic, no legal/claim assessment. |
 | Organization identity completeness and sameAs | `geo.organization`, `geo.entity_links`, `geo.schema_breadth` | `geo.entity` (partial) | Implemented partially: checks supported entity fields, sameAs count, and capped type-breadth bonus; does not prove entity ownership or claim accuracy. |
 | Main-text token estimate and visible-text/HTML ratio | `agent.content_budget`, `geo.content_ratio` | `agent.read.facts` (partial) | Implemented: tokenizer-independent text estimate and visible-text/HTML byte ratio with explicit thresholds; candidate live-site evidence remains. |
 | OpenAPI discovery and operation/schema quality | `agent.openapi.*` | `agent.act.openapi` (discovery only) | Pending; only read-only GET of advertised or standard paths; parser and bounds required. |
@@ -81,7 +81,7 @@ deliberate: an existing related heuristic is not treated as equivalent coverage.
 | Quality and modularity of llms/agent files | `agent.instructions.quality`, `agent.instructions.when_to_use`, `agent.instructions.full` | `agent.find.resources` (discovery only) | Implemented partially for llms.txt Markdown structure, size, fences, five sampled links, explicit use guidance, and llms-full presence. AGENTS.md, skills indexes, AI catalogs, ARD, and modular quality remain. |
 | Commerce profile and Product/Offer signals | `agent.commerce.*` | `geo.entity` (partial) | Pending; applicability depends on site type; no checkout or purchase actions. |
 | Search/entity discoverability | `agent.discoverability.*` | None | Pending; search-key-dependent checks remain not observed when unavailable. |
-| Accessible controls, labels and landmarks | `agent.accessibility.*` | `agent.controls`, `agent.links`, `agent.landmarks` (partial) | Pending; keep static HTML evidence limits explicit. |
+| Accessible controls, labels and landmarks | `agent.form_labels`, `agent.controls`, `agent.links`, `agent.landmarks` | Current static HTML checks count label associations, named controls and links, and main/nav landmarks. No browser accessibility tree or interaction testing. |
 | Hidden prompt-instruction indicators | `agent.prompt_injection_signals` | None | Implemented as an informational-only pattern signal across hidden text and selected accessibility attributes; matched text is omitted from evidence and never followed or executed. |
 | Site-type declaration and applicable check selection | `site.type` | Existing per-check applicability | Pending; extend the existing mechanism instead of introducing a parallel one. |
 | Optional observed task evaluation | `agent.task_evaluation` | `Report.BehavioralEvaluation` | `not_run` by default; opt-in, off-score, and needs separate cost/credential authorization. |
@@ -96,7 +96,7 @@ does not imply that the check already exists.
 | Upstream issue ID | Tier | Reports with failed/partial issue | Is-optimized mapping | Mapping status |
 | --- | --- | --- | --- | --- |
 | `agent-friendly-404` | Essential | prosody.chat, github.com, gymshark.com, is-optimized.com | `agent.markdown_404` | Implemented site-level response probe; pending candidate live-site verification. |
-| `agent-instruction` | Recommended | prosody.chat, gymshark.com, parallel.ai, is-optimized.com | `agent.instructions.when_to_use` | Implemented explicit guidance presence check; candidate live-site evidence remains. |
+| `agent-instruction` | Recommended | prosody.chat, gymshark.com, parallel.ai, is-optimized.com | `agent.instructions.when_to_use`, `agent.instructions.quality` | Implemented bounded guidance quality and explicit use-presence checks; candidate live-site evidence remains. |
 | `agentic-search-specific` | Recommended | prosody.chat, gymshark.com, parallel.ai | `agent.discoverability.docs` | Search-provider/key dependent; not observed without a configured source. |
 | `api-error-model` | Recommended | github.com | `agent.openapi.error_schema` | Planned contract parsing. |
 | `api-schema-analysis` | Recommended | github.com, gymshark.com | `agent.openapi.complexity` | Planned bounded schema analysis. |
@@ -108,22 +108,22 @@ does not imply that the check already exists.
 | `function-calling-compat` | Recommended | github.com, gymshark.com | `agent.openapi.function_calling` | Planned typed operation/schema analysis. |
 | `json-error-responses` | Essential | gymshark.com | `agent.api.json_errors` | Planned; only unauthenticated GET probes. |
 | `json-ld` | Recommended | prosody.chat, github.com, gymshark.com, is-optimized.com | `geo.entity` | Existing entity-presence heuristic is partial; validation/completeness planned. |
-| `markdown-negotiation-vary` | Essential | prosody.chat, github.com, gymshark.com, is-optimized.com | `agent.markdown` | Planned server-side GET negotiation probe. |
+| `markdown-negotiation-vary` | Essential | prosody.chat, github.com, gymshark.com, is-optimized.com | `agent.markdown` | Implemented server-side GET negotiation and `/index.md` fallback; candidate live-site evidence remains. |
 | `mcp-resource-listing` | Essential | gymshark.com, parallel.ai | `agent.mcp.resources` | Planned read-only MCP discovery/list calls. |
 | `mcp-server` | Recommended | vercel.com, github.com | `agent.mcp.server` | Existing interface-link observation is partial. |
 | `metadata-completeness` | Recommended | prosody.chat, gymshark.com, is-optimized.com | `seo.social_metadata` | Implemented for sampled homepage metadata; candidate scan evidence remains to be collected. |
-| `oauth-support` | Essential | parallel.ai | `agent.oauth.metadata` | Existing auth-link observation is partial; metadata-only validation planned. |
+| `oauth-support` | Essential | parallel.ai | `agent.act.auth` | Existing authentication-link discovery is partial; metadata-only validation remains pending. |
 | `onboarding-friction` | Recommended | vercel.com, gymshark.com | `agent.api.onboarding` | Planned public health/error/onboarding observations. |
 | `openapi-spec` | Essential | github.com, gymshark.com | `agent.openapi.discovery` | Existing link discovery is partial; document parsing planned. |
-| `org-schema-completeness` | Recommended | prosody.chat, github.com, galileo.ai, gymshark.com, parallel.ai, is-optimized.com | `geo.organization` | Existing entity-presence check is partial; field/relationship validation planned. |
+| `org-schema-completeness` | Recommended | prosody.chat, github.com, galileo.ai, gymshark.com, parallel.ai, is-optimized.com | `geo.organization`, `geo.entity_links`, `geo.schema_breadth` | Implemented field, sameAs-count and type-breadth checks; truth and entity ownership are not validated. |
 | `pricing-info` | Recommended | gymshark.com | `agent.read.pricing` | Existing linked-pricing observation is partial; no pricing policy inferred. |
 | `public-api` | Recommended | galileo.ai, gymshark.com | `agent.api.reachability` | Planned read-only advertised GET probe. |
 | `public-api-docs` | Recommended | gymshark.com | `agent.developer.api_links` | Existing docs/resource links are partial. |
 | `rate-limit-headers` | Recommended | vercel.com, github.com, galileo.ai, parallel.ai | `agent.api.rate_limits` | Planned; probe safe unauthenticated GET responses only. |
 | `redirect-hygiene` | Essential | gymshark.com | `seo.redirect_hygiene` | Existing requested/final URL evidence is partial; chain/markup checks planned. |
 | `scoped-permissions` | Essential | vercel.com, gymshark.com | `agent.openapi.scopes` | Planned scope parsing; no authorization or token exchange. |
-| `sitemap` | Recommended | prosody.chat, is-optimized.com | `seo.sitemap_quality` | Implemented bounded validity and same-origin check; candidate live-site evidence remains. |
-| `trust-anchors` | Recommended | prosody.chat, galileo.ai, gymshark.com, is-optimized.com | `geo.trust_pages` | Planned bounded probes for about/contact/privacy/terms. |
+| `sitemap` | Recommended | prosody.chat, is-optimized.com | `seo.sitemap_quality`, `seo.sitemap_freshness` | Implemented bounded validity, same-origin and freshness checks; candidate live-site evidence remains. |
+| `trust-anchors` | Recommended | prosody.chat, galileo.ai, gymshark.com, is-optimized.com | `geo.trust.about`, `geo.trust.contact`, `geo.trust.privacy`, `geo.trust.terms` | Implemented bounded probes for about/contact/privacy/terms; candidate live-site evidence remains. |
 
 Captured Is-Optimized production baselines use the older `2026-10-agentready-v1`
 methodology, despite the current source being newer. The public service returned
@@ -143,8 +143,9 @@ Recommended pool, and non-penalty Bonus capped at +5 (final score capped at
 applicable results leave the denominator. The score is withheld below 80%
 coverage or until both scored tiers have observed findings. Current weighted
 page checks now carry Essential/Recommended tiers and feed this score; site
-level P0 checks, per-tier calibration, and live candidate comparisons remain
-in progress.
+level P0 checks are implemented in source; candidate live comparisons and
+empirical calibration remain in progress. Several P1 API/OAuth/MCP checks are
+still planned and the PR is not a full-parity release.
 
 All new findings must keep stable IDs, pillar/stage, weight and applicability,
 proportional verdicts, bounded evidence, remediation examples, and any
