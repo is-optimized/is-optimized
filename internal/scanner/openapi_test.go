@@ -79,6 +79,30 @@ func TestOpenAPIFindingVerdicts(t *testing.T) {
 	}
 }
 
+func TestOpenAPISpecFindingRejectsInvalidRootVersionAndMetadata(t *testing.T) {
+	for _, body := range []string{
+		`{"openapi":"3.bogus","info":{"title":"Example","version":"v1"},"paths":{"/x":{"get":{}}}}`,
+		`{"openapi":"3.1.0","paths":{"/x":{"get":{}}}}`,
+		`{"openapi":"3.1.0","info":{"version":"v1"},"paths":{"/x":{"get":{}}}}`,
+	} {
+		doc, _, err := decodeOpenAPI([]byte(body))
+		if err != nil {
+			t.Fatalf("fixture should decode as JSON: %v", err)
+		}
+		findings := openAPIFindings("https://example.com/openapi.json", doc, true, nil)
+		if findings[0].Status != "fail" {
+			t.Errorf("invalid OpenAPI root unexpectedly passed: %+v", findings[0])
+		}
+	}
+	valid, _, err := decodeOpenAPI([]byte(`{"openapi":"3.2.1","info":{"title":"Example","version":"v1"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := openAPIFindings("https://example.com/openapi.json", valid, true, nil)[0].Status; got != "pass" {
+		t.Fatalf("valid minimal OpenAPI root must pass the contract finding even without visible operations, got %q", got)
+	}
+}
+
 func TestScannerParsesLinkedOpenAPIContract(t *testing.T) {
 	s := fixtureScanner(func(r *http.Request) (*http.Response, error) {
 		switch r.URL.Path {

@@ -45,38 +45,23 @@ func siteAgentChecks(ss *session, home *url.URL, homepage response, homepagePage
 			{ID: "agent.oauth.protected_resource", Pillar: "agent", Title: "Protected-resource metadata", Status: "unknown", Weight: 1, Tier: "recommended", URL: origin(home) + "/.well-known/oauth-protected-resource", Evidence: "Homepage response unavailable; authentication metadata was not probed."},
 		}
 	}
-	results := make(chan reportmodel.Finding, 23)
-	go func() { results <- markdownNegotiationCheck(ss, home, homepage) }()
-	go func() { results <- markdownNotFoundCheck(ss, home) }()
-	go func() { results <- aiCrawlerAccessCheck(ss, home, homepage) }()
+	// Run the essential probes first and in a stable order. The scan shares a
+	// finite discovery budget with sitemap and content selection; unordered
+	// goroutines could otherwise make an optional check consume the last slot
+	// before an essential check gets scheduled.
+	out := make([]reportmodel.Finding, 0, 24)
+	out = append(out, markdownNegotiationCheck(ss, home, homepage))
+	out = append(out, markdownNotFoundCheck(ss, home))
+	out = append(out, aiCrawlerAccessCheck(ss, home, homepage))
+	out = append(out, openAPIChecks(ss, home, homepage, homepagePage)...)
+	out = append(out, oauthChecks(ss, home, homepagePage)...)
+	out = append(out, apiCatalogChecks(ss, home, homepagePage)...)
 	for _, trust := range trustPageDefinitions() {
-		trust := trust
-		go func() { results <- trustPageCheck(ss, home, homepagePage, trust) }()
+		out = append(out, trustPageCheck(ss, home, homepagePage, trust))
 	}
-	go func() { results <- socialMetadataCheck(ss, home, homepagePage) }()
-	for _, schemaFinding := range schemaChecks(home, homepagePage) {
-		schemaFinding := schemaFinding
-		go func() { results <- schemaFinding }()
-	}
-	go func() {
-		for _, f := range agentInstructionChecks(ss, home) {
-			results <- f
-		}
-	}()
-	go func() {
-		for _, f := range openAPIChecks(ss, home, homepage, homepagePage) {
-			results <- f
-		}
-	}()
-	go func() {
-		for _, f := range oauthChecks(ss, home, homepagePage) {
-			results <- f
-		}
-	}()
-	out := make([]reportmodel.Finding, 0, 23)
-	for i := 0; i < cap(results); i++ {
-		out = append(out, <-results)
-	}
+	out = append(out, socialMetadataCheck(ss, home, homepagePage))
+	out = append(out, schemaChecks(home, homepagePage)...)
+	out = append(out, agentInstructionChecks(ss, home)...)
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
 }

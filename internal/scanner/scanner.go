@@ -306,8 +306,6 @@ func (s *Scanner) Scan(ctx context.Context, domain string) (reportmodel.Report, 
 		homeURL = home.url
 	}
 	homePage := pages[0]
-	siteChecks := make(chan []reportmodel.Finding, 1)
-	go func() { siteChecks <- siteAgentChecks(ss, homeURL, home, homePage) }()
 	if fetchErr == nil && pages[0].page.Error == "" {
 		links := selectLinks(pages[0].doc, home.url)
 		sitemapLinks, _, sitemapFindings := sitemapURLs(ss, home.url)
@@ -351,8 +349,7 @@ func (s *Scanner) Scan(ctx context.Context, domain string) (reportmodel.Report, 
 		report.Pages = append(report.Pages, p.page)
 		report.Findings = append(report.Findings, evaluate(p)...)
 	}
-	report.Findings = append(report.Findings, <-siteChecks...)
-	report.Findings = append(report.Findings, apiCatalogChecks(ss, homeURL, homePage)...)
+	report.Findings = append(report.Findings, siteAgentChecks(ss, homeURL, home, homePage)...)
 	report.Findings = markDuplicates(report.Findings, pages)
 	annotateReadiness(report.Findings)
 	report.Pillars = score(report.Findings)

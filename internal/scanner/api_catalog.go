@@ -55,34 +55,11 @@ func apiCatalogChecks(ss *session, home *url.URL, page pageResult) []reportmodel
 		f.Evidence = fmt.Sprintf("Expected RFC 9727 application/linkset+json response; observed HTTP %d with Content-Type %q", resp.code, resp.contentType)
 		return []reportmodel.Finding{f}
 	}
-	var doc apiLinkset
-	if err := json.Unmarshal(resp.body, &doc); err != nil || len(doc.Linkset) == 0 {
+	count, valid := apiCatalogEndpointCount(resp.body)
+	if !valid {
 		f.Status = "fail"
 		f.Evidence = "The response was not a valid Linkset JSON document with a non-empty linkset array."
 		return []reportmodel.Finding{f}
-	}
-	count := 0
-	for _, set := range doc.Linkset {
-		if raw, ok := set["item"]; ok {
-			var links []apiCatalogLink
-			if json.Unmarshal(raw, &links) == nil {
-				for _, link := range links {
-					if validCatalogTarget(link.Href, home) {
-						count++
-					}
-				}
-			}
-		}
-		_, hasAPIDescription := set["service-desc"]
-		_, hasDocumentation := set["service-doc"]
-		_, hasStatus := set["status"]
-		_, hasMetadata := set["service-meta"]
-		if raw, ok := set["anchor"]; ok && (hasAPIDescription || hasDocumentation || hasStatus || hasMetadata) {
-			var anchor string
-			if json.Unmarshal(raw, &anchor) == nil && validCatalogTarget(anchor, home) {
-				count++
-			}
-		}
 	}
 	if count == 0 {
 		f.Status = "fail"
@@ -92,6 +69,62 @@ func apiCatalogChecks(ss *session, home *url.URL, page pageResult) []reportmodel
 	f.Status = "pass"
 	f.Evidence = fmt.Sprintf("A valid RFC 9727 Linkset exposed %d API endpoint link(s).", count)
 	return []reportmodel.Finding{f}
+}
+
+func apiCatalogEndpointCount(body []byte) (int, bool) {
+	var doc apiLinkset
+	if err := json.Unmarshal(body, &doc); err != nil || len(doc.Linkset) == 0 {
+		return 0, false
+	}
+	count := 0
+	for _, set := range doc.Linkset {
+		if raw, ok := set["item"]; ok {
+			links, valid := decodeCatalogLinks(raw)
+			if !valid {
+				return 0, false
+			}
+			for _, link := range links {
+				if validCatalogTarget(link.Href) {
+					count++
+				}
+			}
+		}
+		// RFC 9727's service-* relations describe the API identified by the
+		// Linkset entry's anchor. Count that anchor only when at least one
+		// related Link Target Object is structurally valid.
+		for _, rel := range []string{"service-desc", "service-doc", "status", "service-meta"} {
+			raw, ok := set[rel]
+			if !ok {
+				continue
+			}
+			links, valid := decodeCatalogLinks(raw)
+			if !valid {
+				return 0, false
+			}
+			if len(links) == 0 {
+				continue
+			}
+			var anchor string
+			if json.Unmarshal(set["anchor"], &anchor) == nil && validCatalogTarget(anchor) {
+				count++
+				break
+			}
+		}
+	}
+	return count, true
+}
+
+func decodeCatalogLinks(raw json.RawMessage) ([]apiCatalogLink, bool) {
+	var links []apiCatalogLink
+	if len(raw) == 0 || json.Unmarshal(raw, &links) != nil {
+		return nil, false
+	}
+	for _, link := range links {
+		if strings.TrimSpace(link.Href) == "" {
+			return nil, false
+		}
+	}
+	return links, true
 }
 
 func hasAPISurface(doc *html.Node, home *url.URL) bool {
@@ -116,7 +149,7 @@ func hasAPISurface(doc *html.Node, home *url.URL) bool {
 	}()
 }
 
-func validCatalogTarget(raw string, home *url.URL) bool {
+func validCatalogTarget(raw string) bool {
 	u, err := url.Parse(raw)
-	return err == nil && u.IsAbs() && (u.Scheme == "https" || u.Scheme == "http") && u.Host != "" && u.User == nil
+	return err == nil && u.IsAbs() && validateURL(u) == nil
 }
