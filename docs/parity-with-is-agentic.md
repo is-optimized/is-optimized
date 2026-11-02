@@ -65,8 +65,8 @@ deliberate: an existing related heuristic is not treated as equivalent coverage.
 | Robots directives for named AI crawlers and `Content-Signal` | `agent.robots` | `seo.index` (partial) | Pending; distinguish retrieval from training policy and show per-bot unspecified/allowed/blocked. |
 | Retrieval-agent vs browser response parity | `agent.retrieval_access` | `agent.access` (partial) | Pending; bounded read-only GET probes; compare status and body length. |
 | Sitemap validity, same-host URLs, sample freshness | `seo.sitemap_quality` | `seo.sitemap` (partial) | Pending; existing bounded discovery is not full quality coverage. |
-| Markdown negotiation, fallback files, alternate links and format quality | `agent.markdown` | None | Pending; HTML behavior must remain intact and `Vary: Accept` must be observed. |
-| HTML and Markdown error routes | `agent.markdown_404` | None | Pending; random-path status and body evidence. |
+| Markdown negotiation, fallback files, alternate links and format quality | `agent.markdown` | None | Implemented partially: homepage Accept probe, Vary check, `/index.md` fallback; frontmatter, code fences, and alternate-link target validation remain. |
+| HTML and Markdown error routes | `agent.markdown_404` | None | Implemented: unique-path HTML/Markdown GET probes; validates 404/410, Markdown media type, minimum body length, and link syntax, but not link destination. |
 | Refresh/script redirect stubs, chains and host/scheme consistency | `seo.redirect_hygiene` | `seo.page_status` (partial) | Pending; redirect behavior must be observed, not inferred from markup alone. |
 | Open Graph, Twitter card, language and resolved image | `seo.social_metadata` | `seo.canonical` (partial) | Pending; external image fetches need the shared SSRF-safe budget. |
 | About/contact/privacy/terms trust pages | `geo.trust_pages` | `agent.find.docs` (partial) | Pending; probe a fixed bounded path set and score proportional availability/content. |
@@ -95,7 +95,7 @@ does not imply that the check already exists.
 
 | Upstream issue ID | Tier | Reports with failed/partial issue | Is-optimized mapping | Mapping status |
 | --- | --- | --- | --- | --- |
-| `agent-friendly-404` | Essential | prosody.chat, github.com, gymshark.com, is-optimized.com | `agent.markdown_404` | Planned site-level response probe. |
+| `agent-friendly-404` | Essential | prosody.chat, github.com, gymshark.com, is-optimized.com | `agent.markdown_404` | Implemented site-level response probe; pending candidate live-site verification. |
 | `agent-instruction` | Recommended | prosody.chat, gymshark.com, parallel.ai, is-optimized.com | `agent.instructions.when_to_use` | Existing link discovery is insufficient; content-quality check planned. |
 | `agentic-search-specific` | Recommended | prosody.chat, gymshark.com, parallel.ai | `agent.discoverability.docs` | Search-provider/key dependent; not observed without a configured source. |
 | `api-error-model` | Recommended | github.com | `agent.openapi.error_schema` | Planned contract parsing. |

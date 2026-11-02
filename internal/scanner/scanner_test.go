@@ -331,6 +331,57 @@ func TestAgentReadinessTierScoreAndCoverage(t *testing.T) {
 	}
 }
 
+func TestMarkdownNegotiationAndAgent404Checks(t *testing.T) {
+	homeURL, _ := url.Parse("https://example.com/")
+	home := response{url: homeURL, code: http.StatusOK, contentType: "text/html; charset=utf-8"}
+	tests := []struct {
+		name, markdownType, markdownBody string
+		vary                             string
+		status                           int
+		want404, wantMarkdown            string
+	}{
+		{name: "complete", markdownType: "text/markdown", markdownBody: "# Example\n\n[Docs](/docs)", vary: "Accept", status: http.StatusNotFound, want404: "pass", wantMarkdown: "pass"},
+		{name: "markdown without cache variation", markdownType: "text/markdown", markdownBody: "# Example\n\nBody", status: http.StatusNotFound, want404: "partial", wantMarkdown: "partial"},
+		{name: "correct status without markdown", markdownType: "text/html", markdownBody: "<html>Not found</html>", status: http.StatusNotFound, want404: "partial", wantMarkdown: "fail"},
+		{name: "soft 404", markdownType: "text/markdown", markdownBody: "# Not found\n\n[Docs](/docs)", vary: "Accept", status: http.StatusOK, want404: "fail", wantMarkdown: "pass"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := fixtureScanner(func(r *http.Request) (*http.Response, error) {
+				if r.URL.Path == "/" && r.Header.Get("Accept") == "text/markdown" {
+					v := reply(r, http.StatusOK, "# Example\n\nBody", "text/markdown")
+					if tt.vary != "" {
+						v.Header.Set("Vary", tt.vary)
+					}
+					return v, nil
+				}
+				if strings.HasPrefix(r.URL.Path, "/__is-optimized-404-") {
+					if r.Header.Get("Accept") == "text/markdown" {
+						return reply(r, tt.status, tt.markdownBody, tt.markdownType), nil
+					}
+					return reply(r, tt.status, "Not found", "text/html"), nil
+				}
+				return reply(r, http.StatusNotFound, "", "text/plain"), nil
+			})
+			ss := &session{s: s, ctx: context.Background(), policies: map[string]policy{}}
+			checks := siteAgentChecks(ss, homeURL, home)
+			got := map[string]string{}
+			for _, f := range checks {
+				got[f.ID] = f.Status
+				if f.Weight != 3 || f.Tier != "essential" {
+					t.Fatalf("missing readiness scoring metadata: %+v", f)
+				}
+			}
+			if got["agent.markdown"] != tt.wantMarkdown {
+				t.Fatalf("Markdown negotiation status=%q want %q", got["agent.markdown"], tt.wantMarkdown)
+			}
+			if got["agent.markdown_404"] != tt.want404 {
+				t.Fatalf("Markdown 404 status=%q want %q", got["agent.markdown_404"], tt.want404)
+			}
+		})
+	}
+}
+
 func TestRedirectPrivateRejectedBeforeTransport(t *testing.T) {
 	calls := 0
 	s := fixtureScanner(func(r *http.Request) (*http.Response, error) {

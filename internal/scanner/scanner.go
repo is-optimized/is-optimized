@@ -24,7 +24,7 @@ const MethodologyVersion = "2026-11-agentready-v2"
 const maxBody = 2 << 20
 const maxContentPages = 32
 const maxRequestCount = 64
-const maxDiscoveryCount = 8
+const maxDiscoveryCount = 24
 const maxScanBytes = 12 << 20
 const maxScanDuration = 60 * time.Second
 const defaultPageConcurrency = 8
@@ -120,12 +120,16 @@ func readBudgeted(r io.Reader, total *atomic.Int64, responseLimit, totalLimit in
 }
 
 func (ss *session) fetch(raw string, content bool, site string) (response, error) {
+	return ss.fetchWithHeaders(raw, content, site, nil)
+}
+
+func (ss *session) fetchWithHeaders(raw string, content bool, site string, headers http.Header) (response, error) {
 	var out response
 	u, err := url.Parse(raw)
 	if err != nil {
 		return out, errors.New("invalid URL")
 	}
-	for redirects := 0; redirects <= 3; redirects++ {
+	for redirects := 0; redirects <= 5; redirects++ {
 		if err = validateURL(u); err != nil {
 			return out, err
 		}
@@ -161,6 +165,12 @@ func (ss *session) fetch(raw string, content bool, site string) (response, error
 		}
 		req.Header.Set("User-Agent", userAgent+"/1.0 (+https://is-optimized.com)")
 		req.Header.Set("Accept", "text/html,application/xhtml+xml,application/json,text/plain,application/xml;q=0.8")
+		for name, values := range headers {
+			req.Header.Del(name)
+			for _, value := range values {
+				req.Header.Add(name, value)
+			}
+		}
 		select {
 		case ss.s.slots <- struct{}{}:
 		case <-ctx.Done():
@@ -184,7 +194,7 @@ func (ss *session) fetch(raw string, content bool, site string) (response, error
 			if e != nil {
 				return out, errors.New("invalid redirect")
 			}
-			if redirects == 3 {
+			if redirects == 5 {
 				return out, errors.New("redirect limit reached")
 			}
 			u = loc
@@ -246,6 +256,16 @@ func (ss *session) probe(raw, site string) (response, error) {
 	}
 	return ss.fetch(raw, true, site)
 }
+
+func (ss *session) probeAccept(raw, site, accept string) (response, error) {
+	if ss.discovery.Add(1) > maxDiscoveryCount {
+		ss.discoveryBudgetExhaustions.Add(1)
+		return response{}, errors.New("discovery budget exhausted")
+	}
+	headers := make(http.Header)
+	headers.Set("Accept", accept)
+	return ss.fetchWithHeaders(raw, false, site, headers)
+}
 func (s *Scanner) Scan(ctx context.Context, domain string) (reportmodel.Report, error) {
 	domain, err := NormalizeDomain(domain)
 	if err != nil {
@@ -262,6 +282,11 @@ func (s *Scanner) Scan(ctx context.Context, domain string) (reportmodel.Report, 
 	start := time.Now()
 	home, fetchErr := ss.fetch("https://"+domain+"/", true, "")
 	pages := []pageResult{analyze(home, fetchErr, "https://"+domain+"/", time.Since(start))}
+	homeURL, _ := url.Parse("https://" + domain + "/")
+	if home.url != nil {
+		homeURL = home.url
+	}
+	report.Findings = append(report.Findings, siteAgentChecks(ss, homeURL, home)...)
 	sitemapEvidence := "Not inspected"
 	if fetchErr == nil && pages[0].page.Error == "" {
 		links := selectLinks(pages[0].doc, home.url)
