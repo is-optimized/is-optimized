@@ -29,7 +29,20 @@ capped at 100. Labels describe score bands, not rankings or agent task success.
 These are initial weights pending calibration against the captured public
 reports.
 
-Each check runs against every selected content page. The pillar score aggregates the resulting page/check observations, so each sampled page contributes equally for a given check. All unsuccessful fetches, non-200 responses, denied robots access, unsupported content types, truncation, and parser-limit failures produce unknown weighted findings, including foundational unknowns. A 403 or bot wall is never interpreted as a fully observed failing site.
+The current Agent readiness inventory includes sampled page checks plus two
+site-level checks: `agent.markdown` exercises `Accept: text/markdown` on the
+homepage, checks `Vary: Accept`, and probes `/index.md` as a fallback;
+`agent.markdown_404` makes a unique nonexistent-path request using both HTML
+and Markdown Accept headers. These probes run concurrently through the same
+SSRF-safe GET transport, bounded request/byte budget, same-origin redirect
+policy, and scan deadline. They do not yet validate Markdown frontmatter,
+alternate-link destinations, or Markdown error-body link targets.
+
+Per-page checks run against each selected content page. Site-level checks run
+once per scan. All unsuccessful fetches, non-200 responses, denied robots
+access, unsupported content types, truncation, and parser-limit failures
+produce unknown weighted findings, including foundational unknowns. A 403 or
+bot wall is never interpreted as a fully observed failing site.
 
 | ID | Weight | Applicability and pass/partial/fail rule | Rationale and limit |
 | --- | ---: | --- | --- |
@@ -47,6 +60,8 @@ Each check runs against every selected content page. The pillar score aggregates
 | `agent.landmarks` | 1 | Pass with main and nav elements; partial otherwise. | Initial implementation checks native landmarks, not every equivalent ARIA role. |
 | `agent.controls` | 2 | Not applicable without controls; pass for names on all controls; partial otherwise. | Observes common label and ARIA mechanisms; does not execute interactions or claim a complete accessibility audit. |
 | `agent.links` | 1 | Not applicable without links; pass for names on all links; partial otherwise. | Observes visible/accessible names, not whether every navigation destination works. |
+| `agent.markdown` | 3 | Essential. Pass when Markdown negotiation returns non-HTML Markdown, `Vary: Accept`, and the normal homepage response is HTML; partial when only one negotiation signal is present; fail when neither negotiation nor `/index.md` works; unknown on fetch failure. | One homepage and one fallback probe; frontmatter, code fences, and alternate-link targets are not evaluated. |
+| `agent.markdown_404` | 3 | Essential. Pass for HTML and Markdown 404/410 responses with a Markdown body of at least 20 characters containing a link; partial for correct status without a qualified Markdown body; fail for soft 404 or other status; unknown when either request fails. | Unique path and GET only; link destination and page-specific error behavior are not validated. |
 
 This inventory and fixture results are review evidence for the MVP, not empirical calibration. Additional checks require explicit registry/version changes and tests. Crawler-specific training policies, alleged universal MCP discovery paths, forced API requirements, and fixed answer-length rules carry no score penalty.
 
@@ -58,7 +73,7 @@ This inventory and fixture results are review evidence for the MVP, not empirica
 
 The scanner fetches the homepage and up to 31 additional same-origin HTML pages selected from homepage links and a bounded sitemap candidate set. It distributes selection across path families where possible, then fills unused slots from one additional link hop. It does not recursively crawl child pages. Page fetches use up to eight per-scan workers; a shared per-instance outbound-request limiter and four scan workers add separate bounds. These are provisional code limits, not measured e2-micro capacity. Robots policy is checked before each content fetch, including redirects. Missing robots (404/410) permits fetching; unavailable, malformed, or denying policies leave content unobserved. Child redirects remain on the final homepage origin. Policies use matching user-agent groups, longest matching path rules, wildcard/end markers, and allow precedence on ties.
 
-Limits are 64 requests including redirects, 8 discovery requests including robots and sitemap documents, 3 redirects per fetch, 5 seconds per request, 60 seconds overall, 2 MiB decoded response bodies, 12 MiB aggregate decoded bytes reserved during concurrent reads, 50,000 HTML tokens, and a nesting guard of 512. No target URL may exceed 2,048 bytes. Findings retain bounded 300-character text evidence rather than response bodies or HTML trees. Before durable storage, finding URLs that point to listed report pages are represented by page indexes to avoid repeating long URLs in every finding; HTML and PDF resolve those references back to the same page URLs. The store independently enforces an 850,000-byte record ceiling.
+Limits are 64 requests including redirects, 24 discovery requests including robots and sitemap documents, 5 redirects per fetch, 5 seconds per request, 60 seconds overall, 2 MiB decoded response bodies, 12 MiB aggregate decoded bytes reserved during concurrent reads, 50,000 HTML tokens, and a nesting guard of 512. No target URL may exceed 2,048 bytes. Findings retain bounded 300-character text evidence rather than response bodies or HTML trees. Before durable storage, finding URLs that point to listed report pages are represented by page indexes to avoid repeating long URLs in every finding; HTML and PDF resolve those references back to the same page URLs. The store independently enforces an 850,000-byte record ceiling.
 
 The transport resolves all destination addresses, rejects non-public/mixed public-private answers, and dials an exact validated address while HTTP/TLS retains the requested hostname. It uses no environment proxy. Reserved IPv4, IPv6, mapped addresses, metadata, link-local and transition-prefix cases are covered by focused tests. This is read-only source/test evidence, not a deployed penetration test.
 
