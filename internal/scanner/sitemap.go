@@ -122,7 +122,7 @@ func appendLimited(dst []string, value string, limit int) []string {
 func sitemapURLs(ss *session, home *url.URL) ([]string, string, []reportmodel.Finding) {
 	base := origin(home)
 	policy := ss.getPolicy(home)
-	quality := reportmodel.Finding{ID: "seo.sitemap_quality", Pillar: "seo", Title: "Sitemap validity and same-site URLs", Status: "unknown", Weight: 2, Tier: "recommended", Stage: "find", URL: base + "/robots.txt", Applicability: "Assesses a public sitemap declared in robots.txt or published at a conventional path.", Remediation: "Publish a valid sitemap XML document containing canonical same-site URLs, and declare it in robots.txt."}
+	quality := reportmodel.Finding{ID: "seo.sitemap_quality", Pillar: "seo", Title: "Sitemap validity and same-site URLs", Status: "unknown", Weight: 2, Tier: "recommended", Stage: "find", URL: base + "/robots.txt", Applicability: "Assesses a public sitemap declared in robots.txt or published at a conventional path.", Remediation: "Publish a valid sitemap XML document containing canonical same-site URLs, and declare it in robots.txt.", Standards: []reportmodel.StandardReference{{ID: "Sitemaps XML protocol", URL: "https://www.sitemaps.org/protocol.html", Coverage: "partial"}}}
 	freshness := reportmodel.Finding{ID: "seo.sitemap_freshness", Pillar: "seo", Title: "Sitemap lastmod freshness", Status: "not_applicable", Weight: 1, Tier: "bonus", Stage: "find", URL: base, Applicability: "Bonus observation when a valid sitemap contains URL entries.", Remediation: "Include truthful lastmod dates for recently updated sitemap entries."}
 	if policy.err != nil {
 		quality.Evidence = "robots.txt policy unavailable or malformed; sitemap declarations and fallback access could not be checked."

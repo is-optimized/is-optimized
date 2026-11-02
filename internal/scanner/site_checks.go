@@ -33,9 +33,14 @@ func siteAgentChecks(ss *session, home *url.URL, homepage response, homepagePage
 			{ID: "agent.instructions.quality", Pillar: "agent", Title: "llms.txt quality", Status: "unknown", Weight: 1, Tier: "recommended", URL: origin(home) + "/llms.txt", Evidence: "Homepage response unavailable; agent instructions were not probed."},
 			{ID: "agent.instructions.when_to_use", Pillar: "agent", Title: "Agent when-to-use guidance", Status: "unknown", Weight: 1, Tier: "recommended", URL: origin(home) + "/llms.txt", Evidence: "Homepage response unavailable; agent instructions were not probed."},
 			{ID: "agent.instructions.full", Pillar: "agent", Title: "Full agent reference file", Status: "unknown", URL: origin(home) + "/llms-full.txt", Evidence: "Homepage response unavailable; agent reference was not probed."},
+			{ID: "agent.openapi.spec", Pillar: "agent", Title: "OpenAPI 3 contract", Status: "unknown", Weight: 3, Tier: "essential", URL: origin(home) + "/openapi.json", Evidence: "Homepage response unavailable; public API contracts were not probed."},
+			{ID: "agent.openapi.operations", Pillar: "agent", Title: "OpenAPI operation quality", Status: "unknown", Weight: 2, Tier: "recommended", URL: origin(home) + "/openapi.json", Evidence: "Homepage response unavailable; public API contracts were not probed."},
+			{ID: "agent.openapi.errors", Pillar: "agent", Title: "Typed OpenAPI responses", Status: "unknown", Weight: 1, Tier: "recommended", URL: origin(home) + "/openapi.json", Evidence: "Homepage response unavailable; public API contracts were not probed."},
+			{ID: "agent.openapi.scopes", Pillar: "agent", Title: "Scoped API permissions", Status: "unknown", Weight: 1, Tier: "essential", URL: origin(home) + "/openapi.json", Evidence: "Homepage response unavailable; public API contracts were not probed."},
+			{ID: "agent.openapi.versioning", Pillar: "agent", Title: "API version metadata", Status: "unknown", Weight: 1, Tier: "recommended", URL: origin(home) + "/openapi.json", Evidence: "Homepage response unavailable; public API contracts were not probed."},
 		}
 	}
-	results := make(chan reportmodel.Finding, 14)
+	results := make(chan reportmodel.Finding, 19)
 	go func() { results <- markdownNegotiationCheck(ss, home, homepage) }()
 	go func() { results <- markdownNotFoundCheck(ss, home) }()
 	go func() { results <- aiCrawlerAccessCheck(ss, home, homepage) }()
@@ -53,7 +58,12 @@ func siteAgentChecks(ss *session, home *url.URL, homepage response, homepagePage
 			results <- f
 		}
 	}()
-	out := make([]reportmodel.Finding, 0, 14)
+	go func() {
+		for _, f := range openAPIChecks(ss, home, homepage, homepagePage) {
+			results <- f
+		}
+	}()
+	out := make([]reportmodel.Finding, 0, 19)
 	for i := 0; i < cap(results); i++ {
 		out = append(out, <-results)
 	}
@@ -104,8 +114,9 @@ func assessLLMSText(body string) llmsAssessment {
 }
 
 func agentInstructionChecks(ss *session, home *url.URL) []reportmodel.Finding {
-	quality := reportmodel.Finding{ID: "agent.instructions.quality", Pillar: "agent", Title: "llms.txt quality", Status: "unknown", Weight: 1, Tier: "recommended", Stage: "read", URL: origin(home) + "/llms.txt", Applicability: "Assesses public agent-readable guidance when the site publishes llms.txt.", Remediation: "Publish a concise Markdown llms.txt with an H1, a short summary, a when-to-use section, and working links to authoritative site resources."}
-	when := reportmodel.Finding{ID: "agent.instructions.when_to_use", Pillar: "agent", Title: "Agent when-to-use guidance", Status: "unknown", Weight: 1, Tier: "recommended", Stage: "read", URL: quality.URL, Applicability: "Relevant when the site publishes instructions intended for agent readers.", Remediation: "Add a specific when-to-use section that names best-fit tasks and links to the resources needed to complete them."}
+	llmsSpec := []reportmodel.StandardReference{{ID: "llms.txt format", URL: "https://llmstxt.org/#format", Coverage: "partial"}}
+	quality := reportmodel.Finding{ID: "agent.instructions.quality", Pillar: "agent", Title: "llms.txt quality", Status: "unknown", Weight: 1, Tier: "recommended", Stage: "read", URL: origin(home) + "/llms.txt", Applicability: "Assesses public agent-readable guidance when the site publishes llms.txt.", Remediation: "Publish a concise Markdown llms.txt with an H1, a short summary, a when-to-use section, and working links to authoritative site resources.", Standards: llmsSpec}
+	when := reportmodel.Finding{ID: "agent.instructions.when_to_use", Pillar: "agent", Title: "Agent when-to-use guidance", Status: "unknown", Weight: 1, Tier: "recommended", Stage: "read", URL: quality.URL, Applicability: "Relevant when the site publishes instructions intended for agent readers.", Remediation: "Add a specific when-to-use section that names best-fit tasks and links to the resources needed to complete them.", Standards: llmsSpec}
 	full := reportmodel.Finding{ID: "agent.instructions.full", Pillar: "agent", Title: "Full agent reference file", Status: "information", Stage: "read", URL: origin(home) + "/llms-full.txt", Applicability: "Optional longer reference file; presence alone does not establish quality.", Remediation: "If useful, publish a maintained full reference at /llms-full.txt."}
 	type fetchResult struct {
 		path string
