@@ -74,3 +74,24 @@ func TestAPICatalogApplicabilityAndServerError(t *testing.T) {
 	}
 	t.Fatal("API catalog finding missing")
 }
+
+func TestAPICatalogRejectsMalformedLinkRelations(t *testing.T) {
+	for _, body := range []string{
+		`{"linkset":[{"anchor":"https://example.com/api","service-doc":"bogus"}]}`,
+		`{"linkset":[{"anchor":"https://example.com/api","service-desc":[{"type":"application/openapi+json"}]}]}`,
+		`{"linkset":[{"item":"https://example.com/api"}]}`,
+	} {
+		if count, valid := apiCatalogEndpointCount([]byte(body)); valid && count > 0 {
+			t.Errorf("malformed Linkset unexpectedly produced %d endpoint(s): %s", count, body)
+		}
+	}
+	validBodies := []string{
+		`{"linkset":[{"anchor":"https://example.com/.well-known/api-catalog","item":[{"href":"https://api.example.com/v1"}]}]}`,
+		`{"linkset":[{"anchor":"https://api.example.com/v1","service-desc":[{"href":"https://api.example.com/openapi.json","type":"application/json"}]}]}`,
+	}
+	for _, body := range validBodies {
+		if count, valid := apiCatalogEndpointCount([]byte(body)); !valid || count == 0 {
+			t.Errorf("valid Linkset endpoint rejected (count=%d valid=%t): %s", count, valid, body)
+		}
+	}
+}

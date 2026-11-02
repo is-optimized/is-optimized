@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 
 	"github.com/is-optimized/is-optimized/internal/reportmodel"
@@ -13,7 +14,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const openAPISpecURL = "https://spec.openapis.org/oas/v3.1.0.html"
+const openAPISpecURL = "https://spec.openapis.org/oas/latest.html"
+
+var openAPIVersionPattern = regexp.MustCompile(`^3\.\d+\.\d+$`)
 
 var errOpenAPIYAMLComplexity = errors.New("OpenAPI YAML aliases or complexity limit; format was not observed")
 
@@ -23,11 +26,11 @@ var openAPIMethods = map[string]bool{
 }
 
 type openAPIStats struct {
-	version3, hasOperations, hasSecurity   bool
-	hasOAuth                               bool
-	operations, operationIDs, descriptions int
-	typedSuccess, typedError               int
-	scopedSchemes, versioned               bool
+	version3, validRoot, hasOperations, hasSecurity bool
+	hasOAuth                                        bool
+	operations, operationIDs, descriptions          int
+	typedSuccess, typedError                        int
+	scopedSchemes, versioned                        bool
 }
 
 func openAPIChecks(ss *session, home *url.URL, homepage response, page pageResult) []reportmodel.Finding {
@@ -192,9 +195,10 @@ func validateYAMLNode(node *yaml.Node, depth int, count *int) error {
 func assessOpenAPI(document map[string]any) openAPIStats {
 	stats := openAPIStats{}
 	version := stringValue(document["openapi"])
-	stats.version3 = strings.HasPrefix(version, "3.")
+	stats.version3 = openAPIVersionPattern.MatchString(version)
 	info := mapValue(document["info"])
 	stats.versioned = stringValue(info["version"]) != ""
+	stats.validRoot = stats.version3 && stringValue(info["title"]) != "" && stats.versioned
 	paths := mapValue(document["paths"])
 	for _, pathItemValue := range paths {
 		pathItem := mapValue(pathItemValue)
@@ -286,8 +290,8 @@ func openAPIFindings(raw string, document map[string]any, applicable bool, note 
 		return findings
 	}
 	stats := assessOpenAPI(document)
-	findings[0].Evidence = fmt.Sprintf("OpenAPI version %q observed; %d operations found", stringValue(document["openapi"]), stats.operations)
-	if !stats.version3 || !stats.hasOperations {
+	findings[0].Evidence = fmt.Sprintf("OpenAPI version %q observed; required info title and version present=%t", stringValue(document["openapi"]), stats.validRoot)
+	if !stats.validRoot {
 		findings[0].Status = "fail"
 	} else {
 		findings[0].Status = "pass"

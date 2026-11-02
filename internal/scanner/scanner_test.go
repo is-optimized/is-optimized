@@ -377,6 +377,47 @@ func TestAgentReadinessTierScoreAndCoverage(t *testing.T) {
 	}
 }
 
+func TestEssentialDiscoveryChecksRunBeforeOptionalChecksAtBudgetBoundary(t *testing.T) {
+	home, _ := url.Parse("https://example.com/")
+	body := `<html><head><title>Example API</title></head><body><main><h1>Example</h1><a href="/openapi.json">OpenAPI</a><a href="/oauth/login">OAuth</a></main></body></html>`
+	s := fixtureScanner(func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Path {
+		case "/":
+			return reply(r, http.StatusOK, body, "text/html"), nil
+		case "/openapi.json":
+			return reply(r, http.StatusOK, validOpenAPIJSON, "application/json"), nil
+		case "/.well-known/oauth-authorization-server":
+			return reply(r, http.StatusOK, `{"issuer":"https://example.com","authorization_endpoint":"https://example.com/authorize","code_challenge_methods_supported":["S256"],"scopes_supported":["read"]}`, "application/json"), nil
+		case "/.well-known/oauth-protected-resource":
+			return reply(r, http.StatusOK, `{"resource":"https://example.com/api","authorization_servers":["https://example.com"]}`, "application/json"), nil
+		case "/.well-known/api-catalog":
+			return reply(r, http.StatusOK, `{"linkset":[{"anchor":"https://example.com/.well-known/api-catalog","item":[{"href":"https://api.example.com/v1"}]}]}`, `application/linkset+json`), nil
+		default:
+			return reply(r, http.StatusNotFound, "Not found", "text/plain"), nil
+		}
+	})
+	ss := &session{s: s, ctx: context.Background(), policies: map[string]policy{
+		origin(home): {present: true, status: http.StatusOK, rules: robots{}},
+	}}
+	ss.discovery.Store(maxDiscoveryCount - 11)
+	homepage, err := ss.fetch(home.String(), false, origin(home))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := analyze(homepage, nil, home.String(), time.Millisecond)
+	findings := siteAgentChecks(ss, home, homepage, p)
+	byID := make(map[string]reportmodel.Finding, len(findings))
+	for _, f := range findings {
+		byID[f.ID] = f
+	}
+	for _, id := range []string{"agent.markdown", "agent.markdown_404", "agent.robots", "agent.openapi.spec", "agent.oauth.discovery", "agent.api_catalog"} {
+		f, ok := byID[id]
+		if !ok || f.Status == "unknown" || strings.Contains(f.Evidence, "discovery budget exhausted") {
+			t.Errorf("essential discovery %s was starved at budget boundary: %+v", id, f)
+		}
+	}
+}
+
 func TestMarkdownNegotiationAndAgent404Checks(t *testing.T) {
 	homeURL, _ := url.Parse("https://example.com/")
 	home := response{url: homeURL, code: http.StatusOK, contentType: "text/html; charset=utf-8"}
