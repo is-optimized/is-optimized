@@ -40,6 +40,35 @@ func TestSEOObservations(t *testing.T) {
 	}
 }
 
+func TestContentBudgetAndTextRatioStatuses(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, budget, ratio string
+	}{
+		{name: "small readable page", body: `<main><p>` + strings.Repeat("useful ", 40) + `</p></main>`, budget: "pass", ratio: "pass"},
+		{name: "large main text", body: `<main><p>` + strings.Repeat("x", 60004) + `</p></main>`, budget: "partial", ratio: "pass"},
+		{name: "oversized main text", body: `<main><p>` + strings.Repeat("x", 120004) + `</p></main>`, budget: "fail", ratio: "pass"},
+		{name: "low text ratio", body: `<main>` + strings.Repeat(`<span data-payload="`+strings.Repeat("x", 100)+`">x</span>`, 10) + `</main>`, budget: "pass", ratio: "partial"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := map[string]string{}
+			for _, f := range evaluate(observed(t, "https://example.com/", tc.body)) {
+				if f.ID == "agent.content_budget" || f.ID == "geo.content_ratio" {
+					got[f.ID] = f.Status
+				}
+			}
+			if got["agent.content_budget"] != tc.budget || got["geo.content_ratio"] != tc.ratio {
+				t.Fatalf("unexpected content statuses: %v", got)
+			}
+		})
+	}
+	p := analyze(response{}, errors.New("blocked"), "https://example.com/", 0)
+	for _, f := range evaluate(p) {
+		if (f.ID == "agent.content_budget" || f.ID == "geo.content_ratio") && f.Status != "unknown" {
+			t.Fatalf("unobserved page generated a content result: %+v", f)
+		}
+	}
+}
+
 func TestArticleAttributionApplicabilityRequiresArticleEvidence(t *testing.T) {
 	cases := []struct {
 		name, body, want string

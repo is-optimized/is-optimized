@@ -1,6 +1,6 @@
 # MVP methodology and provenance
 
-This document records the independently implemented MVP check registry and subsequent parity work. It does not claim complete parity with the hosted Is Agentic service. The source of executable behavior is the registries and evaluation in `internal/scanner/checks.go` and `internal/scanner/readiness.go`. New reports identify methodology `2026-11-agentready-v2` and selection policy `home-links-sitemap-two-hop-v2`; prior reports retain the versions under which they were produced.
+This document records the independently implemented MVP check registry and subsequent parity work. It does not claim complete parity with the hosted Is Agentic service. The source of executable behavior is the registries and evaluation in `internal/scanner/checks.go`, `internal/scanner/site_checks.go`, and `internal/scanner/readiness.go`. New reports identify methodology `2026-11-agentready-v3` and selection policy `home-links-sitemap-two-hop-v2`; prior reports retain the versions under which they were produced.
 
 ## Reference provenance
 
@@ -44,6 +44,12 @@ SSRF-safe GET transport, bounded request/byte budget, same-origin redirect
 policy, and scan deadline. They do not yet validate Markdown frontmatter,
 alternate-link destinations, or Markdown error-body link targets.
 
+`seo.social_metadata` checks eight homepage signals: language, Open Graph
+title, description, image, type, URL, Twitter card, and canonical. A declared
+image counts only after a bounded GET returns HTTP 200 with an `image/*`
+content type. External image URLs use the same public-address validation and
+redirect limits as other targets; their response bodies are never retained.
+
 Per-page checks run against each selected content page. Site-level checks run
 once per scan. All unsuccessful fetches, non-200 responses, denied robots
 access, unsupported content types, truncation, and parser-limit failures
@@ -58,8 +64,12 @@ bot wall is never interpreted as a fully observed failing site.
 | `seo.description` | 1 | Fail when absent; partial when reused on distinct observed sample URLs; pass otherwise. | Description presence does not guarantee a displayed search snippet. |
 | `seo.canonical` | 1 | Pass for one valid absolute public HTTP(S) canonical; partial otherwise. | Does not assert that the declared canonical is the correct business choice or fetch its target. |
 | `seo.images` | 1 | Not applicable without images; pass when every image has alt; partial otherwise. | Empty alt may be correct for decorative images. Semantic accuracy is not verified. |
+| `seo.social_metadata` | 2 | Recommended. Pass when all eight listed homepage signals are present and the image resolves; partial when at least one but fewer than all are observed; fail when none are observed; unknown when homepage HTML is unavailable. | A present canonical or image is syntactic/HTTP evidence, not validation of the intended brand or preview quality. |
 | `geo.access` | 3 | Foundational. Pass for usable HTTP 200 HTML; otherwise unknown. | Establishes observable public content only. |
 | `geo.entity` | 2 | Pass for recognized entity types in parseable JSON-LD; partial otherwise. | Recognizes common entity types, not truth, authority, or complete Schema.org validity. |
+| `geo.organization` | 2 | Recommended. Pass when recognized Organization/LocalBusiness/SoftwareApplication/Person nodes contain the applicable required fields; partial for some observed fields; fail when no recognized entity exists; unknown when homepage HTML is unavailable. | Field presence and URL syntax only; the audit does not verify identity, factual accuracy, or legal legitimacy. |
+| `geo.entity_links` | 1 | Recommended. Pass for at least two absolute public `sameAs` links on a recognized entity; partial for one; fail for none or no recognized entity. | Does not verify that profiles belong to this organization. |
+| `geo.schema_breadth` | 1 bonus | Not applicable without JSON-LD types; pass for three or more distinct types; partial when fewer are observed. | Adds only a capped bonus and never subtracts points. |
 | `geo.structure` | 2 | Pass for headings and semantic lists/tables/definitions; partial for headings alone; fail without meaningful headings. | Measures extractable organization, not citation probability. |
 | `geo.author` | 1 | Applies when Article, BlogPosting, or NewsArticle JSON-LD or `og:type=article` is observed. Pass for author metadata plus datetime; partial otherwise. | An HTML `<article>` container alone does not establish editorial attribution; the check still does not recognize every attribution convention. |
 | `agent.access` | 3 | Foundational. Pass for at least 20 initial-HTML words; fail below that, unknown if page unavailable. | A coarse app-shell heuristic. Hidden text, visual rendering and actual tasks are not verified. |
@@ -69,6 +79,8 @@ bot wall is never interpreted as a fully observed failing site.
 | `agent.robots` | 3 | Essential. Pass when all four retrieval agents are allowed by the parsed robots rules and return HTTP 200 with at least 80% of the normal homepage response bytes; fail for a robots block, 401/403, or obvious challenge body; unknown on unavailable/malformed policy or incomplete fetch. | Training-agent rules and Content-Signal are informational; response similarity is byte-count based, not semantic equivalence. |
 | `agent.markdown` | 3 | Essential. Pass when Markdown negotiation returns non-HTML Markdown, `Vary: Accept`, and the normal homepage response is HTML; partial when only one negotiation signal is present; fail when neither negotiation nor `/index.md` works; unknown on fetch failure. | One homepage and one fallback probe; frontmatter, code fences, and alternate-link targets are not evaluated. |
 | `agent.markdown_404` | 3 | Essential. Pass for HTML and Markdown 404/410 responses with a Markdown body of at least 20 characters containing a link; partial for correct status without a qualified Markdown body; fail for soft 404 or other status; unknown when either request fails. | Unique path and GET only; link destination and page-specific error behavior are not validated. |
+| `agent.content_budget` | 1 | Recommended. Pass for an estimated main-text size at or below 15,000 tokens; partial from 15,001 to 30,000; fail above 30,000; unknown when page HTML is unavailable. | Estimate is visible text bytes divided by four, using `<main>` where present and the whole initial text as fallback. It is not a model tokenizer. |
+| `geo.content_ratio` | 1 | Recommended. Pass when visible initial text is at least 5% of HTML response bytes; partial below 5%; unknown when unavailable. | Byte ratio is only a markup-density heuristic, not readability, rendered text, or content quality. |
 | `geo.trust.about`, `geo.trust.contact`, `geo.trust.privacy`, `geo.trust.terms` | 1 each | Recommended. Pass for HTTP 200 HTML with at least 500 visible-text bytes; partial for a non-empty shorter page; fail when missing, empty, or not HTML; unknown when fetch is not permitted or fails. | Probes one same-origin URL per topic, preferring matching homepage links; content truth and legal sufficiency are not judged. |
 
 This inventory and fixture results are review evidence for the MVP, not empirical calibration. Additional checks require explicit registry/version changes and tests. Crawler-specific training policies, alleged universal MCP discovery paths, forced API requirements, and fixed answer-length rules carry no score penalty.

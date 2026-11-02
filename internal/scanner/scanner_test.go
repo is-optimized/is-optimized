@@ -49,6 +49,9 @@ func TestBoundedDepthAndConcurrency(t *testing.T) {
 		if r.URL.Path == "/" {
 			return reply(r, 200, home.String(), "text/html"), nil
 		}
+		if !strings.HasPrefix(r.URL.Path, "/p") && r.URL.Path != "/deep" {
+			return reply(r, 404, "Not found", "text/plain"), nil
+		}
 		n := active.Add(1)
 		for {
 			p := peak.Load()
@@ -113,6 +116,9 @@ func TestScanPageCapAndConcurrencyBound(t *testing.T) {
 				fmt.Fprintf(&links, `<a href="/p%d">page</a>`, i)
 			}
 			return reply(r, 200, links.String(), "text/html"), nil
+		}
+		if !strings.HasPrefix(r.URL.Path, "/p") {
+			return reply(r, 404, "Not found", "text/plain"), nil
 		}
 		n := active.Add(1)
 		for {
@@ -408,7 +414,7 @@ func TestMarkdownNegotiationAndAgent404Checks(t *testing.T) {
 			got := map[string]string{}
 			for _, f := range checks {
 				got[f.ID] = f.Status
-				if f.Weight != 3 || f.Tier != "essential" {
+				if (f.ID == "agent.markdown" || f.ID == "agent.markdown_404" || f.ID == "agent.robots") && (f.Weight != 3 || f.Tier != "essential") {
 					t.Fatalf("missing readiness scoring metadata: %+v", f)
 				}
 			}
@@ -490,6 +496,62 @@ func TestTrustPageFindingsUseStatusAndVisibleText(t *testing.T) {
 			}
 			if got.Tier != "recommended" || got.Weight != 1 {
 				t.Fatalf("unexpected scoring metadata: %+v", got)
+			}
+		})
+	}
+}
+
+func TestSocialMetadataCompletenessAndImageFetch(t *testing.T) {
+	home, _ := url.Parse("https://example.com/")
+	for _, tc := range []struct {
+		name, html string
+		status     string
+	}{
+		{name: "complete", status: "pass", html: `<html lang="en"><head><meta property="og:title" content="Example"><meta property="og:description" content="A description"><meta property="og:image" content="https://example.com/preview.png"><meta property="og:type" content="website"><meta property="og:url" content="https://example.com/"><meta name="twitter:card" content="summary_large_image"><link rel="canonical" href="https://example.com/"></head><body></body></html>`},
+		{name: "partial", status: "partial", html: `<html lang="en"><head><meta property="og:title" content="Example"></head><body></body></html>`},
+		{name: "empty", status: "fail", html: `<html><head></head><body></body></html>`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := fixtureScanner(func(r *http.Request) (*http.Response, error) {
+				if r.URL.Path == "/preview.png" {
+					return reply(r, http.StatusOK, "png", "image/png"), nil
+				}
+				return reply(r, http.StatusNotFound, "", "text/plain"), nil
+			})
+			ss := &session{s: s, ctx: context.Background(), policies: map[string]policy{origin(home): {rules: robots{groups: []robotGroup{{agents: []string{"*"}, rules: []robotRule{{path: "/", allow: true}}}}}}}}
+			got := socialMetadataCheck(ss, home, readinessPage(t, tc.html))
+			if got.Status != tc.status {
+				t.Fatalf("status=%q want %q evidence=%s", got.Status, tc.status, got.Evidence)
+			}
+			if tc.status == "pass" && !strings.Contains(got.Evidence, "HTTP 200 image/*") {
+				t.Fatalf("image not independently resolved: %s", got.Evidence)
+			}
+		})
+	}
+}
+
+func TestSchemaCompletenessSameAsAndBreadth(t *testing.T) {
+	for _, tc := range []struct {
+		name, script, organization, links, breadth string
+	}{
+		{name: "complete organization", script: `{"@graph":[{"@type":"Organization","name":"Example","url":"https://example.com/","logo":"https://example.com/logo.png","description":"Example organization","sameAs":["https://www.linkedin.com/company/example","https://www.wikidata.org/wiki/Q1"],"contactPoint":{"@type":"ContactPoint","contactType":"support","email":"help@example.com"},"address":{"@type":"PostalAddress","addressCountry":"US"}},{"@type":"WebSite","name":"Example"},{"@type":"BreadcrumbList","itemListElement":[]}]}`, organization: "pass", links: "pass", breadth: "pass"},
+		{name: "partial", script: `{"@type":"Organization","name":"Example","sameAs":["https://www.linkedin.com/company/example"]}`, organization: "partial", links: "partial", breadth: "partial"},
+		{name: "no schema", organization: "fail", links: "fail", breadth: "not_applicable"},
+		{name: "unrelated schema", script: `{"@type":"WebSite","name":"Example"}`, organization: "fail", links: "fail", breadth: "partial"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := `<html><head>`
+			if tc.script != "" {
+				body += `<script type="application/ld+json">` + tc.script + `</script>`
+			}
+			body += `</head><body></body></html>`
+			got := map[string]string{}
+			home, _ := url.Parse("https://example.com/")
+			for _, f := range schemaChecks(home, readinessPage(t, body)) {
+				got[f.ID] = f.Status
+			}
+			if got["geo.organization"] != tc.organization || got["geo.entity_links"] != tc.links || got["geo.schema_breadth"] != tc.breadth {
+				t.Fatalf("schema statuses: %v", got)
 			}
 		})
 	}

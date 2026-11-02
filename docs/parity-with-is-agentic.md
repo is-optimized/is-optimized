@@ -68,10 +68,10 @@ deliberate: an existing related heuristic is not treated as equivalent coverage.
 | Markdown negotiation, fallback files, alternate links and format quality | `agent.markdown` | None | Implemented partially: homepage Accept probe, Vary check, `/index.md` fallback; frontmatter, code fences, and alternate-link target validation remain. |
 | HTML and Markdown error routes | `agent.markdown_404` | None | Implemented: unique-path HTML/Markdown GET probes; validates 404/410, Markdown media type, minimum body length, and link syntax, but not link destination. |
 | Refresh/script redirect stubs, chains and host/scheme consistency | `seo.redirect_hygiene` | `seo.page_status` (partial) | Pending; redirect behavior must be observed, not inferred from markup alone. |
-| Open Graph, Twitter card, language and resolved image | `seo.social_metadata` | `seo.canonical` (partial) | Pending; external image fetches need the shared SSRF-safe budget. |
+| Open Graph, Twitter card, language and resolved image | `seo.social_metadata` | `seo.canonical` (partial) | Implemented for eight homepage signals; image is fetched through the SSRF-safe shared budget; no visual preview-quality judgment. |
 | About/contact/privacy/terms trust pages | `geo.trust.*` | `agent.find.docs` (partial) | Implemented partially: probes four same-origin pages and checks 500 visible-text bytes; one standard route per topic, no legal/claim assessment. |
-| Organization identity completeness and sameAs | `geo.organization` | `geo.entity` (partial) | Pending; parse JSON-LD types/fields without asserting truth. |
-| Main-text token estimate and visible-text/HTML ratio | `agent.content_budget`, `geo.content_ratio` | `agent.read.facts` (partial) | Pending; same parser/text extraction with explicit estimate limits. |
+| Organization identity completeness and sameAs | `geo.organization`, `geo.entity_links`, `geo.schema_breadth` | `geo.entity` (partial) | Implemented partially: checks supported entity fields, sameAs count, and capped type-breadth bonus; does not prove entity ownership or claim accuracy. |
+| Main-text token estimate and visible-text/HTML ratio | `agent.content_budget`, `geo.content_ratio` | `agent.read.facts` (partial) | Implemented: tokenizer-independent text estimate and visible-text/HTML byte ratio with explicit thresholds; candidate live-site evidence remains. |
 | OpenAPI discovery and operation/schema quality | `agent.openapi.*` | `agent.act.openapi` (discovery only) | Pending; only read-only GET of advertised or standard paths; parser and bounds required. |
 | Live unauthenticated API behavior, REST/GraphQL, rate limits and error shape | `agent.api.*` | `agent.act.openapi` (discovery only) | Pending; only safe unauthenticated GET; never invoke mutations. |
 | OAuth/OIDC/protected-resource discovery and PKCE | `agent.oauth.*` | `agent.act.auth` (discovery only) | Pending; validate public metadata only, no registration or token exchange. |
@@ -111,7 +111,7 @@ does not imply that the check already exists.
 | `markdown-negotiation-vary` | Essential | prosody.chat, github.com, gymshark.com, is-optimized.com | `agent.markdown` | Planned server-side GET negotiation probe. |
 | `mcp-resource-listing` | Essential | gymshark.com, parallel.ai | `agent.mcp.resources` | Planned read-only MCP discovery/list calls. |
 | `mcp-server` | Recommended | vercel.com, github.com | `agent.mcp.server` | Existing interface-link observation is partial. |
-| `metadata-completeness` | Recommended | prosody.chat, gymshark.com, is-optimized.com | `seo.social_metadata` | Existing canonical check is partial; OG/Twitter/language checks planned. |
+| `metadata-completeness` | Recommended | prosody.chat, gymshark.com, is-optimized.com | `seo.social_metadata` | Implemented for sampled homepage metadata; candidate scan evidence remains to be collected. |
 | `oauth-support` | Essential | parallel.ai | `agent.oauth.metadata` | Existing auth-link observation is partial; metadata-only validation planned. |
 | `onboarding-friction` | Recommended | vercel.com, gymshark.com | `agent.api.onboarding` | Planned public health/error/onboarding observations. |
 | `openapi-spec` | Essential | github.com, gymshark.com | `agent.openapi.discovery` | Existing link discovery is partial; document parsing planned. |
