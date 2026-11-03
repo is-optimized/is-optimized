@@ -68,11 +68,11 @@ func mcpPost(ss *session, endpoint *url.URL, msg mcpMessage, sessionID, version 
 	if p.err != nil || !p.rules.allowed(robotPath) {
 		return out, nil, errors.New("MCP probe blocked by unavailable or disallowing robots policy")
 	}
-	if ss.discovery.Add(1) > maxDiscoveryCount {
+	if !reserveRequest(&ss.discovery, maxDiscoveryCount) {
 		ss.discoveryBudgetExhaustions.Add(1)
 		return out, nil, errors.New("discovery budget exhausted")
 	}
-	if ss.requests.Add(1) > maxRequestCount {
+	if !reserveRequest(&ss.requests, maxRequestCount) {
 		ss.requestBudgetExhaustions.Add(1)
 		return out, nil, errors.New("scan request budget exhausted")
 	}

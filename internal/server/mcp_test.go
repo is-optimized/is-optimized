@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func callMCP(t *testing.T, s *Server, body string) (int, map[string]any) {
@@ -57,6 +58,10 @@ func TestMCPErrorsAndOrigin(t *testing.T) {
 		code float64
 	}{
 		{`{`, -32700},
+		{`[]`, -32600},
+		{`42`, -32600},
+		{`{"jsonrpc":"2.0","id":1,"method":42}`, -32600},
+		{`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":"bad"}`, -32602},
 		{`{"jsonrpc":"1.0","id":1,"method":"ping"}`, -32600},
 		{`{"jsonrpc":"2.0","id":{},"method":"ping"}`, -32600},
 		{`{"jsonrpc":"2.0","id":1,"method":"bogus"}`, -32601},
@@ -78,5 +83,16 @@ func TestMCPErrorsAndOrigin(t *testing.T) {
 	}
 	if got := perform(s, "GET", "/mcp", ""); got.Code != 405 {
 		t.Fatal(got.Code)
+	}
+}
+
+func TestMCPPreservesAdmissionBackoff(t *testing.T) {
+	s, scans, texts := setup(t)
+	s.rates["192.0.2.10"] = []time.Time{time.Now(), time.Now(), time.Now(), time.Now(), time.Now()}
+	_, got := callMCP(t, s, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"scan_website","arguments":{"domain":"example.com"}}}`)
+	result := got["result"].(map[string]any)
+	failure := result["structuredContent"].(map[string]any)
+	if result["isError"] != true || failure["status"] != float64(429) || failure["retry_after_seconds"].(float64) <= 0 || scans.calls != 0 || texts.calls != 0 {
+		t.Fatalf("missing safe backoff: %+v", got)
 	}
 }

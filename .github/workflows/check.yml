@@ -3,6 +3,12 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      qualify_live:
+        description: Run the bounded eight-site public parity qualification
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
@@ -17,3 +23,20 @@ jobs:
       - run: go test -race ./...
       - run: go vet ./...
       - run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o bin/server ./cmd/server
+      - run: node --test cli/cli.test.mjs
+      - run: go version -m bin/server > bin/build-info.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-server-${{ github.sha }}
+          path: bin/
+          retention-days: 3
+      - if: github.event_name == 'workflow_dispatch' && inputs.qualify_live
+        run: go test ./internal/scanner -run '^TestParityLive$' -timeout 12m -count=1 -v
+        env:
+          IS_OPTIMIZED_PARITY_LIVE_DIR: ${{ runner.temp }}/is-optimized-parity
+      - if: always() && github.event_name == 'workflow_dispatch' && inputs.qualify_live
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-parity-${{ github.sha }}
+          path: ${{ runner.temp }}/is-optimized-parity/
+          retention-days: 7

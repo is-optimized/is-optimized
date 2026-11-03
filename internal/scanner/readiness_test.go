@@ -161,11 +161,14 @@ func TestReadinessProbesAdvertisedContractsAndRecordsUnrunInterfaces(t *testing.
 	observedRequests := append([]string(nil), requested...)
 	requestedMu.Unlock()
 	allowedDiscoveryRoutes := map[string]bool{
+		"/favicon.ico": true, "/.well-known/mcp/server-card.json": true, "/mcp": true,
 		"/robots.txt": true, "/index.md": true, "/sitemap.xml": true, "/sitemap_index.xml": true,
 		"/openapi.json": true, "/openapi.yaml": true, "/swagger.json": true, "/api/openapi.json": true,
 		"/.well-known/oauth-authorization-server": true, "/.well-known/openid-configuration": true, "/.well-known/oauth-protected-resource": true,
-		"/.well-known/api-catalog": true,
-		"/llms.txt": true, "/llms-full.txt": true,
+		"/.well-known/api-catalog":             true,
+		"/.well-known/agent-skills/index.json": true,
+		"/llms.txt":                            true, "/llms-full.txt": true,
+		"/AGENTS.md": true, "/agents.md": true, "/auth.md": true,
 	}
 	for _, request := range observedRequests {
 		isNotFoundProbe := strings.HasPrefix(request, "/__is-optimized-404-")

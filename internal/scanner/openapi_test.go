@@ -45,7 +45,7 @@ func TestOpenAPIFindingVerdicts(t *testing.T) {
 		t.Fatal(err)
 	}
 	findings := openAPIFindings("https://example.com/openapi.json", parsed, true, nil)
-	want := map[string]string{"agent.openapi.spec": "pass", "agent.openapi.operations": "pass", "agent.openapi.errors": "pass", "agent.openapi.scopes": "pass", "agent.openapi.versioning": "pass"}
+	want := map[string]string{"agent.openapi.spec": "pass", "agent.openapi.operations": "pass", "agent.openapi.errors": "pass", "agent.openapi.scopes": "pass", "agent.openapi.versioning": "pass", "agent.openapi.function_calling": "pass", "agent.openapi.schema_complexity": "pass", "agent.openapi.patterns": "partial"}
 	for _, f := range findings {
 		if f.Status != want[f.ID] || f.Stage != "act" || f.Applicability == "" || len(f.Standards) == 0 {
 			t.Fatalf("unexpected passing contract finding: %+v", f)

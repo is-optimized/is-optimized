@@ -19,7 +19,7 @@ import (
 
 func siteAgentChecks(ss *session, home *url.URL, homepage response, homepagePage pageResult) []reportmodel.Finding {
 	if homepage.code == 0 {
-		return []reportmodel.Finding{
+		out := []reportmodel.Finding{
 			{ID: "agent.markdown", Pillar: "agent", Title: "Markdown content negotiation", Status: "unknown", Weight: 3, Tier: "essential", URL: origin(home) + "/", Evidence: "Homepage response unavailable; site-level representation was not probed."},
 			{ID: "agent.markdown_404", Pillar: "agent", Title: "Markdown-aware not-found response", Status: "unknown", Weight: 3, Tier: "essential", URL: origin(home), Evidence: "Homepage response unavailable; not-found behavior was not probed."},
 			{ID: "agent.robots", Pillar: "agent", Title: "AI crawler access policy", Status: "unknown", Weight: 3, Tier: "essential", URL: origin(home) + "/robots.txt", Evidence: "Homepage response unavailable; retrieval behavior was not probed."},
@@ -45,6 +45,15 @@ func siteAgentChecks(ss *session, home *url.URL, homepage response, homepagePage
 			{ID: "agent.oauth.scopes", Pillar: "agent", Title: "OAuth scope discovery", Status: "unknown", Weight: 1, Tier: "recommended", URL: origin(home) + "/.well-known/oauth-authorization-server", Evidence: "Homepage response unavailable; authentication metadata was not probed."},
 			{ID: "agent.oauth.protected_resource", Pillar: "agent", Title: "Protected-resource metadata", Status: "unknown", Weight: 1, Tier: "recommended", URL: origin(home) + "/.well-known/oauth-protected-resource", Evidence: "Homepage response unavailable; authentication metadata was not probed."},
 		}
+		reason := "Homepage unavailable; this interface was not observed."
+		out = appendUniqueFindings(out, openAPIFindings(origin(home), nil, true, &reason)...)
+		out = appendUniqueFindings(out, apiSurfaceFindings(ss, home, origin(home), true, nil)...)
+		out = appendUniqueFindings(out, mcpChecks(ss, home, homepage, homepagePage)...)
+		out = appendUniqueFindings(out, developerSurfaceChecks(home, homepagePage)...)
+		out = appendUniqueFindings(out, agentResourceChecks(ss, home, homepagePage)...)
+		out = appendUniqueFindings(out, commerceChecks(home, homepagePage)...)
+		out = appendUniqueFindings(out, siteTypeCheck(home, homepagePage))
+		return out
 	}
 	// Run checks in priority groups. Checks within a group can share bounded
 	// outbound capacity; the next group starts only after the current group has
@@ -59,8 +68,9 @@ func siteAgentChecks(ss *session, home *url.URL, homepage response, homepagePage
 		func() []reportmodel.Finding { return openAPIChecks(ss, home, homepage, homepagePage) },
 		func() []reportmodel.Finding { return oauthChecks(ss, home, homepagePage) },
 		func() []reportmodel.Finding { return apiCatalogChecks(ss, home, homepagePage) },
+		func() []reportmodel.Finding { return mcpChecks(ss, home, homepage, homepagePage) },
 	)...)
-	optional := make([]func() []reportmodel.Finding, 0, 8)
+	optional := make([]func() []reportmodel.Finding, 0, 12)
 	for _, trust := range trustPageDefinitions() {
 		trust := trust
 		optional = append(optional, func() []reportmodel.Finding {
@@ -73,9 +83,27 @@ func siteAgentChecks(ss *session, home *url.URL, homepage response, homepagePage
 		},
 		func() []reportmodel.Finding { return schemaChecks(home, homepagePage) },
 		func() []reportmodel.Finding { return agentInstructionChecks(ss, home) },
+		func() []reportmodel.Finding { return developerSurfaceChecks(home, homepagePage) },
+		func() []reportmodel.Finding { return agentResourceChecks(ss, home, homepagePage) },
+		func() []reportmodel.Finding { return []reportmodel.Finding{siteTypeCheck(home, homepagePage)} },
+		func() []reportmodel.Finding { return commerceChecks(home, homepagePage) },
 	)
 	out = append(out, runFindingChecks(optional...)...)
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+func appendUniqueFindings(out []reportmodel.Finding, additions ...reportmodel.Finding) []reportmodel.Finding {
+	seen := map[string]bool{}
+	for _, finding := range out {
+		seen[finding.ID] = true
+	}
+	for _, finding := range additions {
+		if !seen[finding.ID] {
+			out = append(out, finding)
+			seen[finding.ID] = true
+		}
+	}
 	return out
 }
 
@@ -261,7 +289,7 @@ func schemaChecks(home *url.URL, homepage pageResult) []reportmodel.Finding {
 			return
 		}
 		var value any
-		if json.Unmarshal([]byte(text(n)), &value) == nil {
+		if json.Unmarshal([]byte(rawScriptText(n)), &value) == nil {
 			walkJSONLD(value, &entityMaps, types)
 		}
 	})
