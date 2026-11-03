@@ -1,0 +1,17 @@
+name: is-optimized-edge
+runtime: yaml
+description: Own only Browser Integrity Check for the public is-optimized zone.
+config:
+  zoneId:
+    type: string
+resources:
+  browserIntegrityCheck:
+    type: cloudflare:ZoneSetting
+    properties:
+      zoneId: ${zoneId}
+      settingId: browser_check
+      value: "off"
+    options:
+      version: 6.20.0
+      protect: true
+      retainOnDelete: true
