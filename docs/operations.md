@@ -8,14 +8,31 @@ Pin Go, OPS, and Nanos using `infra/nanos/versions.json`. The release receipt qu
 
 The CA config maps the exact validated `ca-certificates.crt` file into `/etc/ssl/certs`. OPS 0.1.47 treats a `MapDirs` source basename as a matching pattern; naming a directory creates that directory without necessarily copying its contents. Its default common CA bundle is added before configured mappings, so the explicit file mapping overlays that default. The helper parses the supplied PEM file without loading platform trust or making network calls. This fixes packaging fidelity; it does not establish the cause of a guest network timeout. See the [pinned OPS mapping and manifest implementation](https://github.com/nanovms/ops/blob/0.1.47/lepton/image.go).
 
-After packaging, with `OPS_HOME` pointing to that task's `ops-cache` and `OPS_BIN` set to its qualified OPS executable, verify the actual guest file before promotion. The comparison reads the image without booting it or changing cloud resources:
+After packaging, with `OPS_HOME` pointing to that task's `ops-cache`, `OPS_BIN` set to its qualified OPS executable, and `ARTIFACT_DIR`/`CA_DIR` set to the packaging inputs, verify the actual guest file before promotion. OPS 0.1.47's `image cat` renders file bytes using `fmt.Println`, adding one display newline. Remove exactly that one framing byte before comparison; do not use `strip` or `rstrip`, which could hide real differences in the embedded file. The comparison reads the image without booting it or changing cloud resources:
 
 ```sh
-"$OPS_BIN" image cat is-optimized /etc/ssl/certs/ca-certificates.crt | cmp - "$CA_DIR/ca-certificates.crt"
-"$OPS_BIN" image cat is-optimized /etc/ssl/certs/ca-certificates.crt | shasum -a 256
+python3 - <<'PY'
+import hashlib
+import json
+import os
+from pathlib import Path
+import subprocess
+
+config = json.loads((Path(os.environ['ARTIFACT_DIR']) / 'nanos.json').read_text())
+guest_path = config['Env']['SSL_CERT_FILE']
+rendered = subprocess.check_output(
+    [os.environ['OPS_BIN'], 'image', 'cat', 'is-optimized', guest_path], timeout=10)
+if not rendered.endswith(b'\n'):
+    raise SystemExit('Expected OPS image-cat framing newline was not observed')
+embedded = rendered[:-1]
+provided = (Path(os.environ['CA_DIR']) / 'ca-certificates.crt').read_bytes()
+if embedded != provided:
+    raise SystemExit('Embedded CA bundle differs from the supplied file')
+print('guest_ca_sha256=' + hashlib.sha256(embedded).hexdigest())
+PY
 ```
 
-Record the matching input/guest bundle SHA-256 alongside the image receipt. PEM parsing and byte equality do not qualify guest TLS connectivity; retain separate boot and network evidence.
+Record the matching input/guest bundle SHA-256 alongside the image receipt. The pinned [OPS image-cat implementation](https://github.com/nanovms/ops/blob/0.1.47/cmd/cmd_image.go) explains the output framing. PEM parsing and byte equality do not qualify guest TLS connectivity; retain separate boot and network evidence.
 
 GCP images include the Nanos `gcp`/`tls` console logger with log ID `is-optimized-startup`. IaC grants the existing runtime identity write-only logging permission. Inspect fixed startup-stage messages and sanitized error categories; never add credentials, metadata values or provider response bodies to application logs. Metadata bootstrap has a bounded sixty-second retry window; invalid configuration fails immediately. Desired RUNNING state is reconciled on Pulumi updates, not by a new background scheduler. Authenticated virtual-display screenshots are available, but were insufficient to diagnose the observed cold-start failures.
 
