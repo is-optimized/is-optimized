@@ -378,6 +378,9 @@ func mcpChecks(ss *session, home *url.URL, homepage response, page pageResult) [
 		return out
 	}
 	_, bad, e := mcpPost(ss, endpoint, mcpMessage{JSONRPC: "2.0", ID: mcpID(99), Method: errorMethod, Params: false}, sid, version)
+	if e != nil {
+		out[7].Evidence = "Malformed read-only list response was not observed: " + e.Error()
+	}
 	if e == nil {
 		out[7].Status = "fail"
 		out[7].Evidence = "Malformed read-only list params did not return a JSON-RPC error."
