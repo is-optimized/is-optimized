@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"net/http"
 	"net/url"
 	"path"
 	"strings"
@@ -20,10 +21,15 @@ type pageResult struct {
 	htmlBytes    int
 	headerRobots string
 	hsts         string
+	headers      http.Header
+	ttfb         time.Duration
+	ttfbObserved bool
+	tlsNotAfter  time.Time
+	tlsVerified  bool
 }
 
 func analyze(r response, err error, requested string, duration time.Duration) pageResult {
-	p := pageResult{page: reportmodel.Page{URL: requested, RequestedURL: requested, StatusCode: r.code, RedirectCount: r.redirects, DurationMS: duration.Milliseconds()}, htmlBytes: len(r.body)}
+	p := pageResult{page: reportmodel.Page{URL: requested, RequestedURL: requested, StatusCode: r.code, RedirectCount: r.redirects, DurationMS: duration.Milliseconds()}, htmlBytes: len(r.body), headers: r.header.Clone(), ttfb: r.ttfb, ttfbObserved: r.ttfbObserved, tlsNotAfter: r.tlsNotAfter, tlsVerified: r.tlsVerified}
 	if r.url != nil {
 		p.page.URL = r.url.String()
 	}
@@ -637,6 +643,7 @@ func evaluate(p pageResult) []reportmodel.Finding {
 	}
 	out = append(out, reportmodel.Finding{ID: "seo.hsts", Pillar: "seo", Title: "HTTPS transport policy", Status: observationStatus(p), URL: p.page.URL, Evidence: evidence})
 	out = append(out, readinessObservations(p)...)
+	out = append(out, pageParityChecks(p, p.headers)...)
 	annotateReadiness(out)
 	return out
 }
