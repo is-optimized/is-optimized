@@ -17,9 +17,11 @@ import (
 	"testing"
 	"time"
 
+	"cloud.google.com/go/storage"
 	"golang.org/x/crypto/acme/autocert"
 	"golang.org/x/oauth2"
 	"google.golang.org/api/googleapi"
+	"google.golang.org/api/option"
 )
 
 const privateDiagnosticSentinel = "PRIVATE_BUCKET/PRIVATE_KEY?Authorization=PRIVATE_CREDENTIAL"
@@ -181,6 +183,45 @@ func TestStartupClientDiagnosticOperationPreservesCause(t *testing.T) {
 	}
 	if strings.Contains(output.String(), "PRIVATE_") {
 		t.Fatal("provider information escaped")
+	}
+}
+
+type diagnosticHTTPTransport struct{}
+
+func (diagnosticHTTPTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	// An injected in-memory transport prevents credential lookup and provider
+	// traffic while exercising the storage SDK's real error conversion.
+	return &http.Response{StatusCode: http.StatusForbidden, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"code":403,"message":"` + privateDiagnosticSentinel + `"}}`)), Request: request}, nil
+}
+
+func TestStartupGCSCacheErrorsKeepTypedCauseAndHideProviderText(t *testing.T) {
+	output := captureStartupDiagnostics(t)
+	client, err := storage.NewClient(context.Background(), option.WithHTTPClient(&http.Client{Transport: diagnosticHTTPTransport{}}), option.WithoutAuthentication(), storage.WithJSONReads())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	cache := &gcsACMECache{bucket: client.Bucket("PRIVATE_BUCKET"), prefix: "PRIVATE_PREFIX/"}
+	for _, operation := range []func() error{
+		func() error { return cache.Put(context.Background(), "PRIVATE_KEY", []byte("PRIVATE_VALUE")) },
+		func() error { _, err := cache.Get(context.Background(), "PRIVATE_KEY"); return err },
+		func() error { return cache.Delete(context.Background(), "PRIVATE_KEY") },
+	} {
+		err := operation()
+		var provider *googleapi.Error
+		if err == nil || !errors.As(err, &provider) || provider.Code != http.StatusForbidden {
+			t.Fatalf("cache operation did not retain provider type: %v", err)
+		}
+		if strings.Contains(err.Error(), "PRIVATE_") {
+			t.Fatal("cache Error exposed provider data")
+		}
+		if startupErrorCategory(err) != "authorization_rejected" {
+			t.Fatalf("wrong category: %s", startupErrorCategory(err))
+		}
+		startupFailure("https", err)
+	}
+	if strings.Contains(output.String(), "PRIVATE_") {
+		t.Fatal("cache log exposed provider data")
 	}
 }
 
