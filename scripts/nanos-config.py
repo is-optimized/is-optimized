@@ -3,6 +3,7 @@
 import argparse
 import json
 from pathlib import Path
+import ssl
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--mode', choices=('local', 'gcp'), default='gcp')
@@ -17,9 +18,17 @@ if not ca_dir.is_dir() or sorted(p.name for p in ca_dir.iterdir()) != ['ca-certi
 ca_file = ca_dir / 'ca-certificates.crt'
 if ca_file.is_symlink() or not ca_file.is_file():
     parser.error('CA bundle must be a regular, non-symlink file')
-certs = ca_file.read_text()
+try:
+    certs = ca_file.read_text(encoding='utf-8')
+except (OSError, UnicodeError):
+    parser.error('CA bundle must be a readable UTF-8 public certificate file')
 if 'PRIVATE KEY' in certs or '-----BEGIN CERTIFICATE-----' not in certs:
     parser.error('CA bundle must contain public certificates, never private keys')
+try:
+    # Parse this file only. Do not load platform/Keychain trust or use the network.
+    ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT).load_verify_locations(cafile=str(ca_file))
+except (OSError, ssl.SSLError):
+    parser.error('CA bundle must contain parseable public PEM certificates')
 if not args.image.is_absolute():
     parser.error('--image must be an absolute task-owned output path')
 env = {'LISTEN_ADDR': ':8080', 'SMS_ENABLED': 'false',
@@ -30,8 +39,10 @@ if args.mode == 'local':
     env.update({'PUBLIC_URL': 'http://localhost:8080', 'DATA_DIR': '/data'})
 else:
     env['HTTPS_ENABLED'] = 'true'
+# OPS 0.1.47 matches the source basename, rather than copying a directory's
+# contents. Map the exact validated file to overlay OPS's default CA bundle.
 config = {'RunConfig': {'Memory': '1G', 'Ports': ['80', '443'] if args.mode == 'gcp' else ['8080'], 'ImageName': str(args.image)},
-          'MapDirs': {str(ca_dir): '/etc/ssl/certs'}, 'Env': env}
+          'MapDirs': {str(ca_file): '/etc/ssl/certs'}, 'Env': env}
 if args.mode == 'gcp':
     config['CloudConfig'] = {'ImageName': 'is-optimized'}
     # GCE does not reliably expose this guest's console through the serial API.
