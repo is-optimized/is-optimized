@@ -156,6 +156,10 @@ func TestStartupCacheSubstageOrderingAndCleanup(t *testing.T) {
 				if event["stage"] != "https" {
 					t.Fatalf("unexpected stage=%v", event)
 				}
+				// Retry-attempt events have their own exact ordering/privacy tests.
+				if event["substage"] == "cache_write_attempt" || event["substage"] == "cache_write_retry" {
+					continue
+				}
 				elapsed, ok := event["elapsed_ms"].(float64)
 				if !ok || elapsed < 0 {
 					t.Fatalf("missing elapsed time=%v", event)
