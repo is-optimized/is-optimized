@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"log/slog"
 	"net"
@@ -10,16 +12,21 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/is-optimized/is-optimized/internal/messaging"
 	"github.com/is-optimized/is-optimized/internal/scanner"
 	"github.com/is-optimized/is-optimized/internal/server"
 	"github.com/is-optimized/is-optimized/internal/store"
+	"golang.org/x/crypto/acme/autocert"
+	"golang.org/x/oauth2"
+	"google.golang.org/api/googleapi"
 )
 
 func main() {
 	if e := run(); e != nil {
 		slog.Error("service stopped", "reason", startupErrorCategory(e))
+		waitForStartupDiagnostics(e, time.Sleep)
 		os.Exit(1)
 	}
 }
@@ -36,7 +43,7 @@ func run() error {
 	startupStage("metadata", "starting")
 	if err := loadRuntimeConfig(ctx); err != nil {
 		startupFailure("metadata", err)
-		return err
+		return &startupInitializationError{cause: err}
 	}
 	startupStage("metadata", "complete")
 	startupStage("storage", "starting")
@@ -49,7 +56,7 @@ func run() error {
 	}
 	if e != nil {
 		startupFailure("storage", e)
-		return e
+		return &startupInitializationError{cause: e}
 	}
 	defer db.Close()
 	startupStage("storage", "complete")
@@ -58,13 +65,13 @@ func run() error {
 	app, e := server.New(db, scanner.New(), sender, cfg)
 	if e != nil {
 		startupFailure("application", e)
-		return e
+		return &startupInitializationError{cause: e}
 	}
 	startupStage("https", "starting")
 	runtime, e := newRuntimeEndpoints(ctx, app)
 	if e != nil {
 		startupFailure("https", e)
-		return e
+		return &startupInitializationError{cause: e}
 	}
 	defer runtime.closeCache()
 	startupStage("https", "configured")
@@ -104,11 +111,71 @@ func startupFailure(stage string, err error) {
 	slog.Error("startup stage", "stage", stage, "status", "failed", "reason", startupErrorCategory(err))
 }
 
+// Error text is fixed. Unwrap preserves classification without exposing provider
+// URLs, object names, credentials, or response bodies through Error().
+type safeStartupError struct {
+	message string
+	cause   error
+}
+
+func (e *safeStartupError) Error() string { return e.message }
+func (e *safeStartupError) Unwrap() error { return e.cause }
+
+type startupInitializationError struct{ cause error }
+
+func (e *startupInitializationError) Error() string { return "service initialization failed" }
+func (e *startupInitializationError) Unwrap() error { return e.cause }
+
+// Nanos' GCP logging driver ships asynchronously. This bounded grace period
+// gives fatal startup diagnostics an opportunity to ship; it is not a delivery
+// guarantee or retry. Local runs, normal shutdown and runtime failures do not
+// wait. Tests inject the wait rather than sleeping.
+func waitForStartupDiagnostics(err error, wait func(time.Duration)) {
+	var initialization *startupInitializationError
+	if os.Getenv("CONFIG_FROM_METADATA") == "true" && errors.As(err, &initialization) {
+		wait(2 * time.Second)
+	}
+}
+
+type httpsStartupSubstage string
+
+const (
+	httpsCacheClient httpsStartupSubstage = "cache_client"
+	httpsCacheWrite  httpsStartupSubstage = "cache_write"
+	httpsCacheRead   httpsStartupSubstage = "cache_read"
+	httpsCacheDelete httpsStartupSubstage = "cache_delete"
+)
+
+func startupHTTPSOperation(substage httpsStartupSubstage, operation func() error) error {
+	start := time.Now()
+	slog.Info("startup stage", "stage", "https", "substage", string(substage), "status", "starting", "elapsed_ms", int64(0))
+	err := operation()
+	elapsed := time.Since(start).Milliseconds()
+	if err != nil {
+		slog.Error("startup stage", "stage", "https", "substage", string(substage), "status", "failed", "elapsed_ms", elapsed, "reason", startupErrorCategory(err))
+	} else {
+		slog.Info("startup stage", "stage", "https", "substage", string(substage), "status", "complete", "elapsed_ms", elapsed)
+	}
+	return err
+}
+
 func startupErrorCategory(err error) string {
+	var netError net.Error
+	var certificateVerification *tls.CertificateVerificationError
+	var unknownAuthority x509.UnknownAuthorityError
+	var invalidCertificate x509.CertificateInvalidError
+	var hostname x509.HostnameError
+	var systemRoots x509.SystemRootsError
+	var provider *googleapi.Error
+	var token *oauth2.RetrieveError
 	switch {
 	case errors.Is(err, context.Canceled):
 		return "canceled"
 	case errors.Is(err, context.DeadlineExceeded):
+		return "timeout"
+	case errors.As(err, &certificateVerification), errors.As(err, &unknownAuthority), errors.As(err, &invalidCertificate), errors.As(err, &hostname), errors.As(err, &systemRoots):
+		return "tls_verification_failed"
+	case errors.As(err, &netError) && netError.Timeout():
 		return "timeout"
 	case errors.Is(err, errMetadataInvalid):
 		return "invalid_metadata"
@@ -116,6 +183,27 @@ func startupErrorCategory(err error) string {
 		return "unsupported_metadata_key"
 	case errors.Is(err, errMetadataUnavailable):
 		return "metadata_unavailable"
+	case errors.Is(err, autocert.ErrCacheMiss):
+		return "not_found"
+	case errors.As(err, &provider):
+		return startupHTTPErrorCategory(provider.Code)
+	case errors.As(err, &token) && token.Response != nil:
+		return startupHTTPErrorCategory(token.Response.StatusCode)
+	default:
+		return "initialization_or_runtime_error"
+	}
+}
+
+func startupHTTPErrorCategory(code int) string {
+	switch {
+	case code == http.StatusUnauthorized:
+		return "authentication_rejected"
+	case code == http.StatusForbidden:
+		return "authorization_rejected"
+	case code == http.StatusNotFound:
+		return "not_found"
+	case code == http.StatusTooManyRequests || (code >= 500 && code <= 599):
+		return "provider_unavailable"
 	default:
 		return "initialization_or_runtime_error"
 	}

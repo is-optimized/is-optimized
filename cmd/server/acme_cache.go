@@ -27,7 +27,7 @@ type gcsACMECache struct {
 func newGCSACMECache(ctx context.Context, bucket, prefix string) (autocert.Cache, func() error, error) {
 	client, err := storage.NewClient(ctx, storage.WithJSONReads())
 	if err != nil {
-		return nil, nil, errors.New("TLS cache identity unavailable")
+		return nil, nil, &safeStartupError{message: "TLS cache identity unavailable", cause: err}
 	}
 	return &gcsACMECache{bucket: client.Bucket(bucket), prefix: prefix}, client.Close, nil
 }
@@ -43,12 +43,12 @@ func (c *gcsACMECache) Get(ctx context.Context, key string) ([]byte, error) {
 		return nil, autocert.ErrCacheMiss
 	}
 	if err != nil {
-		return nil, errors.New("TLS cache read failed")
+		return nil, &safeStartupError{message: "TLS cache read failed", cause: err}
 	}
 	defer r.Close()
 	data, err := io.ReadAll(io.LimitReader(r, maxACMECacheBytes+1))
 	if err != nil {
-		return nil, errors.New("TLS cache read incomplete")
+		return nil, &safeStartupError{message: "TLS cache read incomplete", cause: err}
 	}
 	if len(data) > maxACMECacheBytes {
 		return nil, errors.New("TLS cache entry exceeds size limit")
@@ -68,11 +68,11 @@ func (c *gcsACMECache) Put(ctx context.Context, key string, data []byte) error {
 	if _, err := w.Write(data); err != nil {
 		_ = w.CloseWithError(err)
 		slog.Error("TLS cache write failed; certificate persistence at risk")
-		return errors.New("TLS cache write failed")
+		return &safeStartupError{message: "TLS cache write failed", cause: err}
 	}
 	if err := w.Close(); err != nil {
 		slog.Error("TLS cache write failed; certificate persistence at risk")
-		return errors.New("TLS cache write failed")
+		return &safeStartupError{message: "TLS cache write failed", cause: err}
 	}
 	return nil
 }
@@ -84,7 +84,7 @@ func (c *gcsACMECache) Delete(ctx context.Context, key string) error {
 		return nil
 	}
 	if err != nil {
-		return errors.New("TLS cache delete failed")
+		return &safeStartupError{message: "TLS cache delete failed", cause: err}
 	}
 	return nil
 }

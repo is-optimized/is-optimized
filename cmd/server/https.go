@@ -172,7 +172,10 @@ func newRuntimeEndpoints(ctx context.Context, app http.Handler) (runtimeEndpoint
 		if bucket == os.Getenv("GCS_REPORT_BUCKET") {
 			return out, errors.New("TLS cache must use a dedicated bucket without report retention rules")
 		}
-		cache, out.closeCache, err = newGCSACMECache(ctx, bucket, prefix)
+		err = startupHTTPSOperation(httpsCacheClient, func() error {
+			cache, out.closeCache, err = newGCSACMECache(ctx, bucket, prefix)
+			return err
+		})
 		if err != nil {
 			return out, err
 		}
@@ -290,16 +293,24 @@ func verifyACMECache(ctx context.Context, cache autocert.Cache) error {
 		return errors.New("TLS cache probe entropy unavailable")
 	}
 	key := "startup-probe-" + hex.EncodeToString(nonce[:])
-	if err := cache.Put(ctx, key, nonce[:]); err != nil {
-		return errors.New("TLS cache is not writable")
+	if err := startupHTTPSOperation(httpsCacheWrite, func() error { return cache.Put(ctx, key, nonce[:]) }); err != nil {
+		return &safeStartupError{message: "TLS cache is not writable", cause: err}
 	}
-	data, err := cache.Get(ctx, key)
-	deleteErr := cache.Delete(ctx, key)
-	if err != nil || !bytes.Equal(data, nonce[:]) {
-		return errors.New("TLS cache persistence check failed")
+	var data []byte
+	err := startupHTTPSOperation(httpsCacheRead, func() error {
+		var err error
+		data, err = cache.Get(ctx, key)
+		if err == nil && !bytes.Equal(data, nonce[:]) {
+			return errors.New("TLS cache returned different probe data")
+		}
+		return err
+	})
+	deleteErr := startupHTTPSOperation(httpsCacheDelete, func() error { return cache.Delete(ctx, key) })
+	if err != nil {
+		return &safeStartupError{message: "TLS cache persistence check failed", cause: err}
 	}
 	if deleteErr != nil {
-		return errors.New("TLS cache cleanup check failed")
+		return &safeStartupError{message: "TLS cache cleanup check failed", cause: deleteErr}
 	}
 	return nil
 }
