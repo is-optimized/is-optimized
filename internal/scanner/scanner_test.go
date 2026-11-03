@@ -399,7 +399,9 @@ func TestEssentialDiscoveryChecksRunBeforeOptionalChecksAtBudgetBoundary(t *test
 	ss := &session{s: s, ctx: context.Background(), policies: map[string]policy{
 		origin(home): {present: true, status: http.StatusOK, rules: robots{}},
 	}}
-	ss.discovery.Store(maxDiscoveryCount - 15)
+	// This API fixture now includes one MCP-card request and a live API GET
+	// in addition to the original fifteen essential discovery requests.
+	ss.discovery.Store(maxDiscoveryCount - 17)
 	homepage, err := ss.fetch(home.String(), false, origin(home))
 	if err != nil {
 		t.Fatal(err)

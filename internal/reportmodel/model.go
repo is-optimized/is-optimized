@@ -15,6 +15,10 @@ type Report struct {
 	Findings             []Finding              `json:"findings"`
 	Pillars              []Pillar               `json:"pillars"`
 	AgentReadiness       *AgentReadinessSummary `json:"agent_readiness,omitempty"`
+	Limitations          []string               `json:"limitations,omitempty"`
+	PreviousReportID     string                 `json:"previous_report_id,omitempty"`
+	Changes              []FindingChange        `json:"changes,omitempty"`
+	ChangesTruncated     bool                   `json:"changes_truncated,omitempty"`
 }
 type Page struct {
 	RequestedURL  string `json:"requested_url,omitempty"`

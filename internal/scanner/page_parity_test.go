@@ -150,6 +150,7 @@ func TestPageParityJSONLDAndBrandEvidence(t *testing.T) {
 		{"name variation", `<title>Different brand</title><script type="application/ld+json">{"@context":"https://schema.org","@type":"Organization","name":"Acme"}</script>`, "pass", "partial"},
 		{"no context", `<script type="application/ld+json">{"@type":"WebSite","name":"Acme"}</script>`, "partial", "not_applicable"},
 		{"malformed", `<script type="application/ld+json">{"@context":</script>`, "fail", "not_applicable"},
+		{"literal newline in string", "<script type=\"application/ld+json\">{\"@context\":\"https://schema.org\",\"@type\":\"Organization\",\"name\":\"Acme\nCompany\"}</script>", "fail", "not_applicable"},
 		{"invalid array", `<script type="application/ld+json">["not a node"]</script>`, "fail", "not_applicable"},
 		{"none", `<title>Acme</title>`, "not_applicable", "not_applicable"},
 	} {

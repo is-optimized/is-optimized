@@ -6,6 +6,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -41,13 +42,14 @@ func (s *Server) mcp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var request rpcRequest
+	var envelope json.RawMessage
 	decoder := json.NewDecoder(r.Body)
-	if err := decoder.Decode(&request); err != nil {
+	if err := decoder.Decode(&envelope); err != nil {
 		rpcError(w, nil, -32700, "Invalid JSON request")
 		return
 	}
 	var trailing any
-	if decoder.Decode(&trailing) != io.EOF || request.Version != "2.0" || request.Method == "" || !validRPCID(request.ID) {
+	if decoder.Decode(&trailing) != io.EOF || json.Unmarshal(envelope, &request) != nil || request.Version != "2.0" || request.Method == "" || !validRPCID(request.ID) {
 		rpcError(w, nil, -32600, "Invalid JSON-RPC request")
 		return
 	}
@@ -138,6 +140,17 @@ func (s *Server) mcp(w http.ResponseWriter, r *http.Request) {
 		var structured any
 		if json.Unmarshal(capture.body.Bytes(), &structured) != nil {
 			structured = map[string]any{"message": strings.TrimSpace(capture.body.String()), "status": capture.status}
+		}
+		if capture.status >= 400 {
+			failure, ok := structured.(map[string]any)
+			if !ok {
+				failure = map[string]any{"data": structured}
+			}
+			failure["status"] = capture.status
+			if seconds, err := strconv.Atoi(capture.header.Get("Retry-After")); err == nil && seconds > 0 {
+				failure["retry_after_seconds"] = seconds
+			}
+			structured = failure
 		}
 		result = map[string]any{"content": []any{map[string]any{"type": "text", "text": capture.body.String()}}, "structuredContent": structured, "isError": capture.status >= 400}
 	default:

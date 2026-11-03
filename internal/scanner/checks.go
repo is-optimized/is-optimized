@@ -447,7 +447,7 @@ func evaluate(p pageResult) []reportmodel.Finding {
 			}
 			if strings.EqualFold(attr(n, "type"), "application/ld+json") {
 				var value any
-				if json.Unmarshal([]byte(text(n)), &value) == nil {
+				if json.Unmarshal([]byte(rawScriptText(n)), &value) == nil {
 					entity = entity || hasEntity(value)
 					article = article || isArticleSchema(value)
 				}

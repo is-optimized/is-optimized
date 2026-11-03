@@ -80,6 +80,9 @@ const (
 )
 
 func reportState(r reportmodel.Report) string {
+	if len(r.Limitations) > 0 {
+		return "partial"
+	}
 	for _, page := range r.Pages {
 		if page.StatusCode != http.StatusOK || page.Error != "" {
 			return "partial"
@@ -625,6 +628,11 @@ func (s *Server) work(ctx context.Context, j Job) {
 		rep, e = s.scan.Scan(ctx, j.Domain)
 		if e == nil {
 			rep.ID = j.ID
+			var latest struct{ ID string }
+			var previous Snapshot
+			if s.db.Get(ctx, "latest_"+hash(j.Domain), &latest) == nil && s.db.Get(ctx, "report_"+latest.ID, &previous) == nil && time.Now().Before(previous.Expires) {
+				rep = reportmodel.WithHistory(rep, previous.Report)
+			}
 			e = s.db.Update(ctx, "evidence_"+j.ID, func(raw json.RawMessage) (any, error) {
 				if len(raw) > 0 {
 					var prior reportmodel.Report

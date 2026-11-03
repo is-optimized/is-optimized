@@ -21,14 +21,14 @@ import (
 	"github.com/is-optimized/is-optimized/internal/reportmodel"
 )
 
-const MethodologyVersion = "2026-11-agentready-v3"
+const MethodologyVersion = "2026-11-agentready-v4"
 const maxBody = 2 << 20
 const maxContentPages = 32
-const maxRequestCount = 64
+const maxRequestCount = 128
 
 // Reserve two extra request slots for redirects during page sampling; keep
 // the remainder available for robots, sitemap, and site-level probes.
-const maxPageRequests = maxContentPages + 2
+const maxPageRequests = maxContentPages * 2
 const maxDiscoveryCount = maxRequestCount - maxPageRequests
 const maxScanBytes = 12 << 20
 const maxScanDuration = 60 * time.Second
@@ -175,15 +175,15 @@ func (ss *session) fetchRequest(raw string, content bool, site string, headers h
 			ss.scanByteBudgetExhaustions.Add(1)
 			return out, errScanByteBudget
 		}
-		if pageRequest && ss.pageRequests.Add(1) > maxPageRequests {
+		if pageRequest && !reserveRequest(&ss.pageRequests, maxPageRequests) {
 			ss.pageRequestBudgetExhaustions.Add(1)
 			return out, errors.New("page request budget exhausted")
 		}
-		if discoveryRequest && ss.discovery.Add(1) > maxDiscoveryCount {
+		if discoveryRequest && !reserveRequest(&ss.discovery, maxDiscoveryCount) {
 			ss.discoveryBudgetExhaustions.Add(1)
 			return out, errors.New("discovery budget exhausted")
 		}
-		if ss.requests.Add(1) > maxRequestCount {
+		if !reserveRequest(&ss.requests, maxRequestCount) {
 			ss.requestBudgetExhaustions.Add(1)
 			return out, errors.New("scan request budget exhausted")
 		}
@@ -375,12 +375,14 @@ func (s *Scanner) Scan(ctx context.Context, domain string) (reportmodel.Report, 
 		report.Findings = append(report.Findings, evaluate(p)...)
 	}
 	report.Findings = append(report.Findings, siteAgentChecks(ss, homeURL, home, homePage)...)
+	report.Findings = append(report.Findings, externalProviderChecks(homeURL.String())...)
 	report.Findings = append(report.Findings, pageLinkParityChecks(ss, pages, homeURL)...)
 	report.Findings = markDuplicates(report.Findings, pages)
 	annotateReadiness(report.Findings)
 	report.Pillars = score(report.Findings)
 	_, readinessSummary := scoreAgentReadiness(report.Findings)
 	report.AgentReadiness = &readinessSummary
+	applyScanLimitations(&report, ss)
 	report.CompletedAt = time.Now().UTC()
 	failedPages := 0
 	for _, page := range report.Pages {
@@ -401,6 +403,39 @@ func (s *Scanner) Scan(ctx context.Context, domain string) (reportmodel.Report, 
 		"scan_byte_budget_exhaustions", ss.scanByteBudgetExhaustions.Load(), "response_size_exhaustions", ss.responseSizeExhaustions.Load(),
 		"timeouts", ss.timeouts.Load(), "duration_ms", time.Since(start).Milliseconds(), "deadline_reached", deadlineReached(ctx))
 	return report, nil
+}
+
+// Reserve before dispatch without counting refused work as an outbound request.
+func reserveRequest(counter *atomic.Int32, limit int32) bool {
+	for {
+		used := counter.Load()
+		if used >= limit {
+			return false
+		}
+		if counter.CompareAndSwap(used, used+1) {
+			return true
+		}
+	}
+}
+
+func applyScanLimitations(report *reportmodel.Report, ss *session) {
+	if ss.requestBudgetExhaustions.Load() > 0 || ss.discoveryBudgetExhaustions.Load() > 0 || ss.pageRequestBudgetExhaustions.Load() > 0 {
+		report.Limitations = append(report.Limitations, "The scan reached its request budget. Findings preserve observed evidence; scores are withheld because request competition may leave different checks unobserved.")
+	}
+	if ss.scanByteBudgetExhaustions.Load() > 0 || ss.responseSizeExhaustions.Load() > 0 {
+		report.Limitations = append(report.Limitations, "A response or scan byte limit was reached. Findings are partial and scores are withheld.")
+	}
+	if deadlineReached(ss.ctx) {
+		report.Limitations = append(report.Limitations, "The scan time budget was reached. Findings are partial and scores are withheld.")
+	}
+	if len(report.Limitations) > 0 {
+		for i := range report.Pillars {
+			report.Pillars[i].Score = nil
+		}
+		if report.AgentReadiness != nil {
+			report.AgentReadiness.ScoreLabel = ""
+		}
+	}
 }
 
 func pageURL(raw string) *url.URL {

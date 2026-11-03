@@ -33,12 +33,16 @@ type openAPIStats struct {
 	operations, operationIDs, descriptions          int
 	typedSuccess, typedError                        int
 	scopedSchemes, versioned                        bool
+	typedSuccessJSON, paginationOps, idempotencyOps int
+	async202Ops, batchOps, functionCallingOps       int
+	schemaCount, schemaNodes                        int
 }
 
 func openAPIChecks(ss *session, home *url.URL, homepage response, page pageResult) []reportmodel.Finding {
 	clue, candidates := openAPIHints(home, homepage, page)
 	if !clue {
-		return openAPIFindings(home.String(), nil, false, nil)
+		findings := openAPIFindings(home.String(), nil, false, nil)
+		return append(findings, apiSurfaceFindings(ss, home, "", false, nil)...)
 	}
 	var chosen *url.URL
 	var decoded map[string]any
@@ -111,17 +115,21 @@ func openAPIChecks(ss *session, home *url.URL, homepage response, page pageResul
 	}
 	if chosen == nil {
 		if lastErr != nil {
-			return openAPIFindings(origin(home)+"/openapi.json", nil, true, &lastEvidence)
+			findings := openAPIFindings(origin(home)+"/openapi.json", nil, true, &lastEvidence)
+			return append(findings, apiSurfaceFindings(ss, home, "", true, nil)...)
 		}
 		if lastEvidence == "" {
 			lastEvidence = "API/developer documentation links were observed, but no public OpenAPI document was found at the linked or conventional paths."
 		}
-		return openAPIFindings(origin(home)+"/openapi.json", nil, true, &lastEvidence)
+		findings := openAPIFindings(origin(home)+"/openapi.json", nil, true, &lastEvidence)
+		return append(findings, apiSurfaceFindings(ss, home, "", true, nil)...)
 	}
 	if lastEvidence != "" {
-		return openAPIFindings(chosen.String(), decoded, true, &lastEvidence)
+		findings := openAPIFindings(chosen.String(), decoded, true, &lastEvidence)
+		return append(findings, apiSurfaceFindings(ss, home, chosen.String(), true, nil)...)
 	}
-	return openAPIFindings(chosen.String(), decoded, true, nil)
+	findings := openAPIFindings(chosen.String(), decoded, true, nil)
+	return append(findings, apiSurfaceFindings(ss, home, chosen.String(), true, decoded)...)
 }
 
 func openAPIHints(home *url.URL, homepage response, page pageResult) (bool, []*url.URL) {
@@ -247,6 +255,8 @@ func assessOpenAPI(document map[string]any) openAPIStats {
 				stats.descriptions++
 			}
 			responses := mapValue(operation["responses"])
+			hasTypedSuccess := false
+			hasTypedJSONSuccess := false
 			for code, responseValue := range responses {
 				resp := mapValue(responseValue)
 				content := mapValue(resp["content"])
@@ -259,13 +269,39 @@ func assessOpenAPI(document map[string]any) openAPIStats {
 				}
 				if strings.HasPrefix(code, "2") && typed {
 					stats.typedSuccess++
+					hasTypedSuccess = true
+					for mediaType, mediaValue := range content {
+						if strings.Contains(strings.ToLower(mediaType), "json") && hasSchema(mapValue(mediaValue)["schema"]) {
+							hasTypedJSONSuccess = true
+							break
+						}
+					}
 				}
 				if (strings.HasPrefix(code, "4") || strings.HasPrefix(code, "5")) && typed {
 					stats.typedError++
 				}
 			}
+			if hasTypedJSONSuccess {
+				stats.typedSuccessJSON++
+			}
+			if hasTypedSuccess && stringValue(operation["operationId"]) != "" {
+				stats.functionCallingOps++
+			}
+			if hasPaginationSignal(operation) {
+				stats.paginationOps++
+			}
+			if hasIdempotencyHeader(operation) {
+				stats.idempotencyOps++
+			}
+			if hasAsync202(responses) {
+				stats.async202Ops++
+			}
+			if hasBatchArrayRequest(operation) {
+				stats.batchOps++
+			}
 		}
 	}
+	stats.schemaCount, stats.schemaNodes = measureSchemas(document, 0)
 	components := mapValue(document["components"])
 	schemes := mapValue(components["securitySchemes"])
 	stats.hasSecurity = len(schemes) > 0
@@ -286,6 +322,126 @@ func assessOpenAPI(document map[string]any) openAPIStats {
 	return stats
 }
 
+func hasPaginationSignal(operation map[string]any) bool {
+	for _, parameterValue := range sliceValue(operation["parameters"]) {
+		parameter := mapValue(parameterValue)
+		name := strings.ToLower(stringValue(parameter["name"]))
+		if name == "cursor" || name == "page" || name == "page_size" || name == "page-size" || name == "limit" || name == "offset" || name == "next_token" || name == "nexttoken" {
+			return true
+		}
+	}
+	return false
+}
+
+func hasIdempotencyHeader(operation map[string]any) bool {
+	for _, parameterValue := range sliceValue(operation["parameters"]) {
+		parameter := mapValue(parameterValue)
+		if strings.EqualFold(stringValue(parameter["in"]), "header") && strings.EqualFold(stringValue(parameter["name"]), "Idempotency-Key") {
+			return true
+		}
+	}
+	return false
+}
+
+func hasAsync202(responses map[string]any) bool {
+	resp, ok := responses["202"]
+	if !ok {
+		return false
+	}
+	response := mapValue(resp)
+	for _, header := range mapValue(response["headers"]) {
+		if strings.EqualFold(stringValue(mapValue(header)["name"]), "Location") {
+			return true
+		}
+	}
+	for name := range mapValue(response["headers"]) {
+		if strings.EqualFold(name, "Location") {
+			return true
+		}
+	}
+	for _, mediaValue := range mapValue(response["content"]) {
+		properties := mapValue(mapValue(mapValue(mediaValue)["schema"])["properties"])
+		for name := range properties {
+			if strings.EqualFold(name, "jobId") || strings.EqualFold(name, "job_id") || strings.EqualFold(name, "statusUrl") || strings.EqualFold(name, "status_url") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func hasBatchArrayRequest(operation map[string]any) bool {
+	for _, mediaValue := range mapValue(mapValue(operation["requestBody"])["content"]) {
+		schema := mapValue(mediaValue)["schema"]
+		if stringValue(mapValue(schema)["type"]) == "array" || stringValue(mapValue(mapValue(schema)["items"])["type"]) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func sliceValue(value any) []any {
+	if values, ok := value.([]any); ok {
+		return values
+	}
+	return nil
+}
+
+func measureSchemas(value any, depth int) (count, nodes int) {
+	if depth > 32 {
+		return 0, 0
+	}
+	switch v := value.(type) {
+	case map[string]any:
+		for key, child := range v {
+			if key == "schema" {
+				count++
+				nodes += countSchemaSubtree(child, 0)
+				continue
+			}
+			if key == "schemas" {
+				for _, schema := range mapValue(child) {
+					count++
+					nodes += countSchemaSubtree(schema, 0)
+				}
+				continue
+			}
+			c, n := measureSchemas(child, depth+1)
+			count += c
+			nodes += n
+		}
+	case []any:
+		for _, child := range v {
+			c, n := measureSchemas(child, depth+1)
+			count += c
+			nodes += n
+		}
+	}
+	return count, nodes
+}
+
+func countSchemaSubtree(value any, depth int) int {
+	if depth > 32 {
+		return 1
+	}
+	switch v := value.(type) {
+	case map[string]any:
+		n := 1
+		for _, child := range v {
+			n += countSchemaSubtree(child, depth+1)
+		}
+		return n
+	case []any:
+		n := 0
+		for _, child := range v {
+			n += countSchemaSubtree(child, depth+1)
+		}
+		return n
+	default:
+		return 0
+	}
+}
+
 func isOpenAPIObject(value any) bool {
 	_, ok := value.(map[string]any)
 	return ok
@@ -302,6 +458,9 @@ func openAPIFindings(raw string, document map[string]any, applicable bool, note 
 		base("agent.openapi.errors", "Typed OpenAPI responses", "recommended", 1, "Describe JSON response bodies with schemas for successful and error responses."),
 		base("agent.openapi.scopes", "Scoped API permissions", "essential", 1, "Describe named OAuth scopes in OpenAPI security schemes when API access is authenticated."),
 		base("agent.openapi.versioning", "API version metadata", "recommended", 1, "Declare the API version in the OpenAPI info.version field and document supported compatibility policy."),
+		base("agent.openapi.function_calling", "Function-calling compatibility", "recommended", 1, "Provide stable operation IDs and typed JSON success schemas so API operations can be represented as tool calls."),
+		base("agent.openapi.schema_complexity", "API schema complexity", "recommended", 1, "Keep public request and response schemas typed, bounded, and understandable; avoid deeply nested or extremely broad contracts."),
+		base("agent.openapi.patterns", "API interaction patterns", "recommended", 1, "Document pagination, idempotency keys, asynchronous job responses, and batch endpoints where your API needs those patterns."),
 	}
 	if !applicable {
 		for i := range findings {
@@ -362,6 +521,30 @@ func openAPIFindings(raw string, document map[string]any, applicable bool, note 
 		findings[4].Status = "pass"
 	} else {
 		findings[4].Status = "fail"
+	}
+	findings[5].Evidence = fmt.Sprintf("%d/%d operations have operationId and typed success data; %d operations declare typed JSON success responses", stats.functionCallingOps, stats.operations, stats.typedSuccessJSON)
+	if stats.operations == 0 || stats.functionCallingOps == 0 {
+		findings[5].Status = "fail"
+	} else if stats.functionCallingOps < stats.operations || stats.typedSuccessJSON < stats.operations {
+		findings[5].Status = "partial"
+	} else {
+		findings[5].Status = "pass"
+	}
+	findings[6].Evidence = fmt.Sprintf("%d schema roots; %d nested schema nodes counted with depth limited to 32", stats.schemaCount, stats.schemaNodes)
+	if stats.schemaCount == 0 {
+		findings[6].Status = "partial"
+	} else if stats.schemaNodes <= 1000 {
+		findings[6].Status = "pass"
+	} else {
+		findings[6].Status = "partial"
+	}
+	findings[7].Evidence = fmt.Sprintf("%d pagination, %d idempotency-key, %d asynchronous 202, and %d batch operation pattern(s) found", stats.paginationOps, stats.idempotencyOps, stats.async202Ops, stats.batchOps)
+	if stats.paginationOps+stats.idempotencyOps+stats.async202Ops+stats.batchOps == 0 {
+		findings[7].Status = "partial"
+	} else if stats.paginationOps > 0 && stats.idempotencyOps > 0 && stats.async202Ops > 0 && stats.batchOps > 0 {
+		findings[7].Status = "pass"
+	} else {
+		findings[7].Status = "partial"
 	}
 	return findings
 }

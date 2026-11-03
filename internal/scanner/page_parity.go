@@ -136,7 +136,7 @@ func pageParityChecks(p pageResult, headers http.Header) []reportmodel.Finding {
 			if strings.EqualFold(strings.TrimSpace(attr(n, "type")), "application/ld+json") {
 				jsonBlocks++
 				var value any
-				if json.Unmarshal([]byte(text(n)), &value) == nil {
+				if json.Unmarshal([]byte(rawScriptText(n)), &value) == nil {
 					valid, context := pageJSONLDShape(value)
 					if valid {
 						validJSON++
@@ -255,6 +255,19 @@ func pageNodeInHead(n *html.Node) bool {
 		}
 	}
 	return false
+}
+
+// rawScriptText preserves the source bytes needed by JSON syntax validation.
+// Normal visible-text extraction would collapse whitespace inside JSON strings
+// and could turn malformed source into apparently valid structured data.
+func rawScriptText(n *html.Node) string {
+	var body strings.Builder
+	walk(n, func(child *html.Node) {
+		if child.Type == html.TextNode {
+			body.WriteString(child.Data)
+		}
+	})
+	return body.String()
 }
 
 func pageParityFinding(p pageResult, id, pillar, title, fix, spec string, weight float64) reportmodel.Finding {
