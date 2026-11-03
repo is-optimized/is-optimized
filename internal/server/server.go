@@ -139,6 +139,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Frame-Options", "DENY")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
+	if strings.HasPrefix(r.URL.Path, "/api/") {
+		w.Header().Add("Vary", "Accept")
+	}
+	if strings.HasPrefix(r.URL.Path, "/api/") && wantsJSON(r) {
+		problem := &problemWriter{ResponseWriter: w}
+		defer problem.finish()
+		w = problem
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
 	if strings.HasPrefix(r.URL.Path, "/api/") && r.Method == "POST" {
 		origin := r.Header.Get("Origin")

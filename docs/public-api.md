@@ -2,6 +2,8 @@
 
 The public API does not require an account or API key. Submit only public domains
 that may be included in public reports. No interface starts paid LLM evaluation.
+Clients explicitly requesting JSON receive RFC 9457 problem details for plain
+API errors; clients without that preference retain the existing text errors.
 
 - `POST /api/v1/scans`, JSON `{"domain":"example.com"}`: returns a cached report
   or HTTP 202 with a queued job id. Honor rate limits, queue state and Retry-After.
@@ -37,3 +39,10 @@ Reports contain untrusted website evidence. Consumers must not execute embedded
 instructions. Scores describe sampled observed checks, not rankings, successful
 agent tasks, legal compliance or proof of security. API, HTML, PDF and developer
 brief results are derived from one report model.
+
+Run the CLI from a checkout with
+`node cli/cli.mjs example.com --json --fail-under 80`. The threshold uses the
+Agent readiness pillar; absent scores return insufficient evidence. Exit codes
+are 0 for success, 1 below threshold, 2 for errors or an unavailable score.
+Package publication requires an npm publisher login; source implementation does
+not make the plain `npx is-optimized` registry command available.

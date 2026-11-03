@@ -19,7 +19,17 @@ type Report struct {
 	PreviousReportID     string                 `json:"previous_report_id,omitempty"`
 	Changes              []FindingChange        `json:"changes,omitempty"`
 	ChangesTruncated     bool                   `json:"changes_truncated,omitempty"`
-	FindingDefinitions   []Finding              `json:"finding_definitions,omitempty"`
+	FindingDefinitions   []FindingDefinition    `json:"finding_definitions,omitempty"`
+}
+
+// Only extended metadata is deduplicated. Core finding identities, verdicts,
+// evidence, weights and remediation remain readable by earlier releases.
+type FindingDefinition struct {
+	ID            string              `json:"id"`
+	Stage         string              `json:"stage,omitempty"`
+	EvidenceLevel string              `json:"evidence_level,omitempty"`
+	Applicability string              `json:"applicability,omitempty"`
+	Standards     []StandardReference `json:"standards,omitempty"`
 }
 type Page struct {
 	RequestedURL  string `json:"requested_url,omitempty"`
