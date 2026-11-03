@@ -1,0 +1,6 @@
+# Stack-local configuration may contain encrypted provider secrets and must not
+# be committed. The nonsecret config.example.yaml remains tracked.
+Pulumi.*.yaml
+.pulumi/
+preview*.json
+preview*.log

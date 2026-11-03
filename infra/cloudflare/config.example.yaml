@@ -1,0 +1,4 @@
+# Nonsecret configuration example. Copy into the coordinator's selected stack
+# only after verifying backend, project, zone ownership and credential scope.
+config:
+  is-optimized-edge:zoneId: c110deebc79d486a28722cca21255430
