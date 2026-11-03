@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"mime"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"strings"
 	"sync"
@@ -70,12 +71,16 @@ type session struct {
 	policies                     map[string]policy
 }
 type response struct {
-	url         *url.URL
-	code        int
-	redirects   int
-	body        []byte
-	contentType string
-	header      http.Header
+	url          *url.URL
+	code         int
+	redirects    int
+	body         []byte
+	contentType  string
+	header       http.Header
+	ttfb         time.Duration
+	ttfbObserved bool
+	tlsNotAfter  time.Time
+	tlsVerified  bool
 }
 
 var errScanByteBudget = errors.New("scan byte budget exhausted")
@@ -202,6 +207,12 @@ func (ss *session) fetchRequest(raw string, content bool, site string, headers h
 			cancel()
 			return out, ctx.Err()
 		}
+		requestStarted := time.Now()
+		var firstByte atomic.Int64
+		trace := &httptrace.ClientTrace{GotFirstResponseByte: func() {
+			firstByte.CompareAndSwap(0, max(1, time.Since(requestStarted).Nanoseconds()))
+		}}
+		req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
 		resp, e := ss.s.transport.RoundTrip(req)
 		if e != nil {
 			<-ss.s.slots
@@ -230,6 +241,14 @@ func (ss *session) fetchRequest(raw string, content bool, site string, headers h
 		<-ss.s.slots
 		cancel()
 		out = response{url: u, code: resp.StatusCode, redirects: redirects, body: data, contentType: resp.Header.Get("Content-Type"), header: resp.Header.Clone()}
+		if elapsed := firstByte.Load(); elapsed > 0 {
+			out.ttfb = time.Duration(elapsed)
+			out.ttfbObserved = true
+		}
+		if resp.TLS != nil && len(resp.TLS.PeerCertificates) > 0 {
+			out.tlsNotAfter = resp.TLS.PeerCertificates[0].NotAfter
+			out.tlsVerified = resp.TLS.HandshakeComplete && len(resp.TLS.VerifiedChains) > 0
+		}
 		if errors.Is(e, errScanByteBudget) {
 			ss.scanByteBudgetExhaustions.Add(1)
 			return out, e
@@ -356,6 +375,7 @@ func (s *Scanner) Scan(ctx context.Context, domain string) (reportmodel.Report, 
 		report.Findings = append(report.Findings, evaluate(p)...)
 	}
 	report.Findings = append(report.Findings, siteAgentChecks(ss, homeURL, home, homePage)...)
+	report.Findings = append(report.Findings, pageLinkParityChecks(ss, pages, homeURL)...)
 	report.Findings = markDuplicates(report.Findings, pages)
 	annotateReadiness(report.Findings)
 	report.Pillars = score(report.Findings)
