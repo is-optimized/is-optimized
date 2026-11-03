@@ -6,6 +6,17 @@ The web pilot is deployed. Read the [verified recovery receipt](cold-start-recov
 
 Pin Go, OPS, and Nanos using `infra/nanos/versions.json`. The release receipt qualifies Go 1.26.0, OPS 0.1.47 and Nanos 0.1.56 for the representative web path. Build the Linux ELF with CGO disabled, generate the nonsecret OPS configuration using `scripts/nanos-config.py --mode local|gcp --ca-dir <public-CA-only-directory> --image <absolute-task-image-path>`, and boot-test changed images before promotion. Package a raw disk archive accepted by GCP and supply its local path as the Pulumi `imageArchive` input. Do not upload/create cloud images through OPS commands; Pulumi owns the bucket object, image, and single VM.
 
+The CA config maps the exact validated `ca-certificates.crt` file into `/etc/ssl/certs`. OPS 0.1.47 treats a `MapDirs` source basename as a matching pattern; naming a directory creates that directory without necessarily copying its contents. Its default common CA bundle is added before configured mappings, so the explicit file mapping overlays that default. The helper parses the supplied PEM file without loading platform trust or making network calls. This fixes packaging fidelity; it does not establish the cause of a guest network timeout. See the [pinned OPS mapping and manifest implementation](https://github.com/nanovms/ops/blob/0.1.47/lepton/image.go).
+
+After packaging, with `OPS_HOME` pointing to that task's `ops-cache` and `OPS_BIN` set to its qualified OPS executable, verify the actual guest file before promotion. The comparison reads the image without booting it or changing cloud resources:
+
+```sh
+"$OPS_BIN" image cat is-optimized /etc/ssl/certs/ca-certificates.crt | cmp - "$CA_DIR/ca-certificates.crt"
+"$OPS_BIN" image cat is-optimized /etc/ssl/certs/ca-certificates.crt | shasum -a 256
+```
+
+Record the matching input/guest bundle SHA-256 alongside the image receipt. PEM parsing and byte equality do not qualify guest TLS connectivity; retain separate boot and network evidence.
+
 GCP images include the Nanos `gcp`/`tls` console logger with log ID `is-optimized-startup`. IaC grants the existing runtime identity write-only logging permission. Inspect fixed startup-stage messages and sanitized error categories; never add credentials, metadata values or provider response bodies to application logs. Metadata bootstrap has a bounded sixty-second retry window; invalid configuration fails immediately. Desired RUNNING state is reconciled on Pulumi updates, not by a new background scheduler. Authenticated virtual-display screenshots are available, but were insufficient to diagnose the observed cold-start failures.
 
 The current packaging configuration deliberately disables SMS. Secure runtime secret retrieval, workload identity, CA roots, clock behavior, Firestore/GCS connectivity and PDF font rendering must be demonstrated inside Nanos before enabling production. Never bake `TWILIO_AUTH_TOKEN` or a service-account private key into an image. Runtime environment injection is acceptable for local testing only; qualify the implemented ADC-authenticated Secret Manager retrieval path for the production image. Set TWILIO_AUTH_TOKEN_SECRET to a numeric resource version and grant the runtime identity access only to that secret.
