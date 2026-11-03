@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { pathToFileURL } from 'node:url';
+import { realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 export function options(argv) {
   const out = { json: false, api: 'https://is-optimized.com', timeout: 370000 };
@@ -87,4 +88,15 @@ export async function run(argv, io = {}) {
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) process.exitCode = await run(process.argv.slice(2));
+function isMainModule() {
+  if (!process.argv[1]) return false;
+  try {
+    // npm's .bin entry is a symlink, while Node resolves import.meta.url to the
+    // target module. Compare filesystem identities without running on import.
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (isMainModule()) process.exitCode = await run(process.argv.slice(2));
