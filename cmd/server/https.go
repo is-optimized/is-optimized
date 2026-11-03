@@ -288,6 +288,7 @@ func serveRuntime(ctx context.Context, runtime runtimeEndpoints) error {
 
 // Reject an unavailable/unwritable persistent cache before any certificate order.
 func verifyACMECache(ctx context.Context, cache autocert.Cache) error {
+	ctx = startupACMEProbeContext(ctx)
 	var nonce [32]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
 		return errors.New("TLS cache probe entropy unavailable")
