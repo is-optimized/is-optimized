@@ -1,0 +1,12 @@
+{
+  "name": "is-optimized",
+  "version": "0.1.0",
+  "description": "Public website readiness audits with observed evidence and remediation",
+  "type": "module",
+  "license": "Apache-2.0",
+  "engines": { "node": ">=18" },
+  "bin": { "is-optimized": "cli/cli.mjs" },
+  "files": ["cli/cli.mjs", "README.md", "LICENSE"],
+  "scripts": { "test:cli": "node --test cli/cli.test.mjs" },
+  "repository": { "type": "git", "url": "https://github.com/is-optimized/is-optimized.git" }
+}
