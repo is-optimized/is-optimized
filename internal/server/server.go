@@ -118,6 +118,7 @@ func New(db store.Store, scan Scanner, sender messaging.Sender, cfg Config) (*Se
 	s.mux.HandleFunc("GET /assets/{name}", render.Asset)
 	s.mux.HandleFunc("POST /api/v1/scans", s.createScan)
 	s.mux.HandleFunc("GET /api/v1/scans/{id}", s.scanStatus)
+	s.mux.HandleFunc("GET /api/v1/reports/{domain}", s.latestJSON)
 	s.mux.HandleFunc("POST /api/v1/report-requests", s.requestReport)
 	s.mux.HandleFunc("POST /webhooks/twilio/inbound", s.inbound)
 	s.mux.HandleFunc("POST /webhooks/twilio/status", s.callback)
@@ -780,6 +781,14 @@ func (s *Server) pdf(w http.ResponseWriter, r *http.Request) {
 	w.Write(b)
 }
 func (s *Server) latest(w http.ResponseWriter, r *http.Request) {
+	s.latestReport(w, r, false)
+}
+
+func (s *Server) latestJSON(w http.ResponseWriter, r *http.Request) {
+	s.latestReport(w, r, true)
+}
+
+func (s *Server) latestReport(w http.ResponseWriter, r *http.Request, asJSON bool) {
 	domain, e := scanner.NormalizeDomain(r.PathValue("domain"))
 	if e != nil {
 		http.NotFound(w, r)
@@ -792,6 +801,10 @@ func (s *Server) latest(w http.ResponseWriter, r *http.Request) {
 	}
 	snap, ok := s.load(w, r, latest.ID)
 	if !ok {
+		return
+	}
+	if asJSON {
+		jsonOut(w, http.StatusOK, snap.Report)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
