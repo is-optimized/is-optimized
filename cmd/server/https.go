@@ -294,7 +294,9 @@ func verifyACMECache(ctx context.Context, cache autocert.Cache) error {
 		return errors.New("TLS cache probe entropy unavailable")
 	}
 	key := "startup-probe-" + hex.EncodeToString(nonce[:])
-	if err := startupHTTPSOperation(httpsCacheWrite, func() error { return cache.Put(ctx, key, nonce[:]) }); err != nil {
+	if err := startupHTTPSOperation(httpsCacheWrite, func() error {
+		return putStartupACMEProbe(ctx, cache, key, nonce[:], startupCacheRetryWait)
+	}); err != nil {
 		return &safeStartupError{message: "TLS cache is not writable", cause: err}
 	}
 	var data []byte
