@@ -7,6 +7,6 @@
   "engines": { "node": ">=18" },
   "bin": { "is-optimized": "cli/cli.mjs" },
   "files": ["cli/cli.mjs", "README.md", "LICENSE"],
-  "scripts": { "test:cli": "node --test cli/cli.test.mjs" },
+  "scripts": { "test:cli": "node --test cli/*.test.mjs" },
   "repository": { "type": "git", "url": "https://github.com/is-optimized/is-optimized.git" }
 }

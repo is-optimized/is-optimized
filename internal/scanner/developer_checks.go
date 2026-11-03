@@ -607,20 +607,21 @@ func agentResourceChecks(ss *session, home *url.URL, page pageResult) []reportmo
 	} else {
 		mediaType, _, _ := mime.ParseMediaType(idxResp.contentType)
 		var parsed skillsIndex
-		if mediaType != "application/json" || json.Unmarshal(idxResp.body, &parsed) != nil || parsed.Schema != agentSkillsSchemaV020 {
+		if mediaType != "application/json" || json.Unmarshal(idxResp.body, &parsed) != nil || parsed.Schema != agentSkillsSchemaV020 || parsed.Skills == nil {
 			index.Status, index.Evidence = "fail", "Index must be application/json and use the Agent Skills Discovery v0.2.0 schema URI."
 		} else {
 			valid := true
 			artifactUnavailable := 0
 			artifactBroken := 0
 			digestsChecked := 0
+			artifactsAttempted := 0
 			descriptionMismatch := false
 			for _, skill := range parsed.Skills {
 				if !validSkillEntry(skill) {
 					valid = false
 					continue
 				}
-				if digestsChecked == 2 {
+				if artifactsAttempted == 2 {
 					continue
 				}
 				u, err := url.Parse(skill.URL)
@@ -635,13 +636,18 @@ func agentResourceChecks(ss *session, home *url.URL, page pageResult) []reportmo
 				}
 				headers := make(http.Header)
 				headers.Set("Accept-Encoding", "identity")
+				artifactsAttempted++
 				artifact, err := ss.fetchRequest(u.String(), true, origin(u), headers, false, true)
 				if err != nil {
 					artifactUnavailable++
 					continue
 				}
 				if artifact.code != http.StatusOK {
-					artifactBroken++
+					if artifact.code == http.StatusNotFound || artifact.code == http.StatusGone {
+						artifactBroken++
+					} else {
+						artifactUnavailable++
+					}
 					continue
 				}
 				digest := sha256.Sum256(artifact.body)
@@ -690,6 +696,8 @@ func agentResourceChecks(ss *session, home *url.URL, page pageResult) []reportmo
 		auth.Evidence = "No authentication, API, or developer surface was observed; an auth guide is not applicable."
 	} else if authResp, authErr := ss.probe(origin(home)+"/auth.md", origin(home)); authErr != nil {
 		auth.Status, auth.Evidence = "unknown", "auth.md was not observed: "+authErr.Error()
+	} else if authResp.code != http.StatusOK && authResp.code != http.StatusNotFound && authResp.code != http.StatusGone {
+		auth.Status, auth.Evidence = "unknown", fmt.Sprintf("auth.md was not observed: HTTP %d", authResp.code)
 	} else if authResp.code != http.StatusOK || looksLikeHTML(authResp.body) {
 		auth.Status, auth.Evidence = "fail", fmt.Sprintf("/auth.md returned HTTP %d instead of a public Markdown guide", authResp.code)
 	} else {
