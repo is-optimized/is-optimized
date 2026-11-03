@@ -119,11 +119,14 @@ func New(db store.Store, scan Scanner, sender messaging.Sender, cfg Config) (*Se
 	s.mux.HandleFunc("POST /api/v1/scans", s.createScan)
 	s.mux.HandleFunc("GET /api/v1/scans/{id}", s.scanStatus)
 	s.mux.HandleFunc("GET /api/v1/reports/{domain}", s.latestJSON)
+	s.mux.HandleFunc("POST /mcp", s.mcp)
+	s.mux.HandleFunc("GET /mcp", s.mcp)
 	s.mux.HandleFunc("POST /api/v1/report-requests", s.requestReport)
 	s.mux.HandleFunc("POST /webhooks/twilio/inbound", s.inbound)
 	s.mux.HandleFunc("POST /webhooks/twilio/status", s.callback)
 	s.mux.HandleFunc("GET /reports/{id}/pdf", s.pdf)
 	s.mux.HandleFunc("GET /reports/{id}", s.report)
+	s.registerPublicRoutes()
 	s.mux.HandleFunc("GET /{domain}", s.latest)
 	return s, nil
 }
@@ -791,12 +794,12 @@ func (s *Server) latestJSON(w http.ResponseWriter, r *http.Request) {
 func (s *Server) latestReport(w http.ResponseWriter, r *http.Request, asJSON bool) {
 	domain, e := scanner.NormalizeDomain(r.PathValue("domain"))
 	if e != nil {
-		http.NotFound(w, r)
+		s.notFound(w, r)
 		return
 	}
 	var latest struct{ ID string }
 	if s.db.Get(r.Context(), "latest_"+hash(domain), &latest) != nil {
-		http.NotFound(w, r)
+		s.notFound(w, r)
 		return
 	}
 	snap, ok := s.load(w, r, latest.ID)
