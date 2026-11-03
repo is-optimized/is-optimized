@@ -19,6 +19,7 @@ type Report struct {
 	PreviousReportID     string                 `json:"previous_report_id,omitempty"`
 	Changes              []FindingChange        `json:"changes,omitempty"`
 	ChangesTruncated     bool                   `json:"changes_truncated,omitempty"`
+	FindingDefinitions   []Finding              `json:"finding_definitions,omitempty"`
 }
 type Page struct {
 	RequestedURL  string `json:"requested_url,omitempty"`
@@ -29,21 +30,22 @@ type Page struct {
 	DurationMS    int64  `json:"duration_ms"`
 }
 type Finding struct {
-	ID            string              `json:"id"`
-	Pillar        string              `json:"pillar"`
-	Title         string              `json:"title"`
-	Status        string              `json:"status"` // pass, partial, fail, unknown, not_applicable, information
-	URL           string              `json:"url,omitempty"`
-	PageIndex     *int                `json:"page_index,omitempty"`
-	Evidence      string              `json:"evidence"`
-	Remediation   string              `json:"remediation"`
-	Weight        float64             `json:"weight"`
-	Tier          string              `json:"readiness_tier,omitempty"`
-	Foundational  bool                `json:"foundational"`
-	Stage         string              `json:"stage,omitempty"`
-	EvidenceLevel string              `json:"evidence_level,omitempty"`
-	Applicability string              `json:"applicability,omitempty"`
-	Standards     []StandardReference `json:"standards,omitempty"`
+	ID              string              `json:"id"`
+	Pillar          string              `json:"pillar"`
+	Title           string              `json:"title"`
+	Status          string              `json:"status"` // pass, partial, fail, unknown, not_applicable, information
+	URL             string              `json:"url,omitempty"`
+	PageIndex       *int                `json:"page_index,omitempty"`
+	DefinitionIndex *int                `json:"definition_index,omitempty"`
+	Evidence        string              `json:"evidence"`
+	Remediation     string              `json:"remediation"`
+	Weight          float64             `json:"weight"`
+	Tier            string              `json:"readiness_tier,omitempty"`
+	Foundational    bool                `json:"foundational"`
+	Stage           string              `json:"stage,omitempty"`
+	EvidenceLevel   string              `json:"evidence_level,omitempty"`
+	Applicability   string              `json:"applicability,omitempty"`
+	Standards       []StandardReference `json:"standards,omitempty"`
 }
 
 type ReadinessTierSummary struct {

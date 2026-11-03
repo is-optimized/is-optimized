@@ -376,6 +376,8 @@ func (s *Scanner) Scan(ctx context.Context, domain string) (reportmodel.Report, 
 	}
 	report.Findings = append(report.Findings, siteAgentChecks(ss, homeURL, home, homePage)...)
 	report.Findings = append(report.Findings, externalProviderChecks(homeURL.String())...)
+	report.Findings = append(report.Findings, entityConsistencyChecks(pages)...)
+	report.Findings = append(report.Findings, pricingChecks(homeURL, pages)...)
 	report.Findings = append(report.Findings, pageLinkParityChecks(ss, pages, homeURL)...)
 	report.Findings = markDuplicates(report.Findings, pages)
 	annotateReadiness(report.Findings)

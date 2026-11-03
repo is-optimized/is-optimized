@@ -59,7 +59,7 @@ func readinessObservations(p pageResult) []reportmodel.Finding {
 			}
 			if n.Data == "script" && strings.EqualFold(strings.TrimSpace(attr(n, "type")), "application/ld+json") && len(structured) < 64 {
 				var data any
-				if json.Unmarshal([]byte(text(n)), &data) == nil {
+				if json.Unmarshal([]byte(rawScriptText(n)), &data) == nil {
 					collectFacts(data, &structured)
 				}
 			}

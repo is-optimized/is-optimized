@@ -98,7 +98,7 @@ func (s *Server) publicDocument(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{"linkset": []any{map[string]any{"anchor": base + "/", "service-desc": []any{map[string]any{"href": base + "/openapi.json", "type": "application/vnd.oai.openapi+json"}}, "service-doc": []any{map[string]any{"href": base + "/docs", "type": "text/html"}}}}})
 	case "/.well-known/agent-skills/index.json":
 		digest := fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(auditSkill)))
-		jsonOut(w, 200, map[string]any{"$schema": "https://schemas.agentskills.io/discovery/0.2.0/schema.json", "skills": []any{map[string]any{"name": "is-optimized-audit", "type": "skill-md", "description": "Request a public website readiness audit and interpret findings using recorded evidence.", "url": base + "/.well-known/agent-skills/is-optimized-audit/SKILL.md", "digest": digest}}})
+		jsonOut(w, 200, map[string]any{"$schema": "https://schemas.agentskills.io/discovery/0.2.0/schema.json", "skills": []any{map[string]any{"name": "is-optimized-audit", "type": "skill-md", "description": "Request a public website readiness audit and interpret SEO, GEO, AEO and agent findings using recorded evidence.", "url": base + "/.well-known/agent-skills/is-optimized-audit/SKILL.md", "digest": digest}}})
 	case "/.well-known/mcp/server-card.json":
 		jsonOut(w, 200, map[string]any{"name": "is-optimized", "description": "Audit public website readiness and retrieve evidence-based public reports.", "version": "1.0.0", "url": base + "/mcp", "endpoint": base + "/mcp", "transport": "streamable-http", "protocolVersion": mcpVersion, "authentication": map[string]any{"required": false}, "tools": publicMCPTools()})
 	case "/.well-known/ai-catalog.json":
