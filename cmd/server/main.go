@@ -126,14 +126,16 @@ type startupInitializationError struct{ cause error }
 func (e *startupInitializationError) Error() string { return "service initialization failed" }
 func (e *startupInitializationError) Unwrap() error { return e.cause }
 
-// Nanos' GCP logging driver ships asynchronously. This bounded grace period
-// gives fatal startup diagnostics an opportunity to ship; it is not a delivery
-// guarantee or retry. Local runs, normal shutdown and runtime failures do not
-// wait. Tests inject the wait rather than sleeping.
+// Nanos 0.1.56 schedules GCP log delivery on a ten-second timer:
+// https://github.com/nanovms/nanos/blob/0.1.56/klib/gcp.c#L370-L375
+// Thirty seconds allows that timer and network delivery an opportunity to run.
+// This is a bounded grace period, not a delivery guarantee or retry. Local runs,
+// normal shutdown and runtime failures do not wait. Tests inject the wait rather
+// than sleeping.
 func waitForStartupDiagnostics(err error, wait func(time.Duration)) {
 	var initialization *startupInitializationError
 	if os.Getenv("CONFIG_FROM_METADATA") == "true" && errors.As(err, &initialization) {
-		wait(2 * time.Second)
+		wait(30 * time.Second)
 	}
 }
 

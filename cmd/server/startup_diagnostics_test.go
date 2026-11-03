@@ -241,7 +241,7 @@ func TestStartupDiagnosticGraceIsBoundedAndOnlyForGCPInitialization(t *testing.T
 			var waits []time.Duration
 			waitForStartupDiagnostics(test.err, func(d time.Duration) { waits = append(waits, d) })
 			if test.want {
-				if !reflect.DeepEqual(waits, []time.Duration{2 * time.Second}) {
+				if !reflect.DeepEqual(waits, []time.Duration{30 * time.Second}) {
 					t.Fatalf("waits=%v", waits)
 				}
 			} else if len(waits) != 0 {
