@@ -6,9 +6,11 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/is-optimized/is-optimized/internal/reportmodel"
 )
@@ -257,5 +259,31 @@ func TestMCPToolAndResourceVerdicts(t *testing.T) {
 	assessMCPResources(out, []map[string]any{{"uri": "ui://app/view", "name": "App", "mimeType": "text/html;profile=mcp-app"}}, false)
 	if out[4].Status != "pass" || out[5].Status != "pass" || out[8].Status != "unknown" {
 		t.Fatal(out)
+	}
+}
+
+// Opt-in only: exercise the real secure transport without making ordinary test
+// runs depend on a third-party server or issuing traffic without operator intent.
+// No tool call, resource read, sampling, or model invocation is sent.
+func TestMCPLivePublicEndpoint(t *testing.T) {
+	raw := os.Getenv("IS_OPTIMIZED_MCP_LIVE_ENDPOINT")
+	if raw == "" {
+		t.Skip("set IS_OPTIMIZED_MCP_LIVE_ENDPOINT to an advertised public HTTPS endpoint")
+	}
+	u, err := url.Parse(raw)
+	if err != nil || validateURL(u) != nil || u.Scheme != "https" || u.RawQuery != "" {
+		t.Fatal("live endpoint must be a public HTTPS URL without a query")
+	}
+	home, _ := url.Parse(origin(u) + "/")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	ss := &session{s: New(), ctx: ctx, policies: map[string]policy{}}
+	page := readinessPage(t, `<link rel="mcp-server" href="`+u.String()+`">`)
+	findings := mcpChecks(ss, home, response{code: 200}, page)
+	for _, finding := range findings {
+		t.Logf("%s status=%s evidence=%s", finding.ID, finding.Status, finding.Evidence)
+	}
+	if findings[0].Status != "pass" && findings[0].Status != "partial" {
+		t.Fatalf("live protocol initialization was not qualified: %s", findings[0].Evidence)
 	}
 }
