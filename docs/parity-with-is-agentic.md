@@ -85,7 +85,7 @@ deliberate: an existing related heuristic is not treated as equivalent coverage.
 | Accessible controls, labels and landmarks | `agent.form_labels`, `agent.controls`, `agent.links`, `agent.landmarks` | Current static HTML checks count label associations, named controls and links, and main/nav landmarks. No browser accessibility tree or interaction testing. |
 | Hidden prompt-instruction indicators | `agent.prompt_injection_signals` | None | Implemented as an informational-only pattern signal across hidden text and selected accessibility attributes; matched text is omitted from evidence and never followed or executed. |
 | Site-type declaration and applicable check selection | `site.type` | Existing per-check applicability | Implemented as an informational override/inference (`docs`, `business`, `app`, `store`). It informs developer checks and gates storefront scoring, but does not globally suppress unrelated checks by type. |
-| Optional observed task evaluation | `agent.task_evaluation` | `Report.BehavioralEvaluation` | `not_run` by default; opt-in, off-score, and needs separate cost/credential authorization. |
+| Optional observed task evaluation | `agent.task_evaluation` | `Report.BehavioralEvaluation` | Explicitly excluded by owner: no paid LLM or simulated agent task runs. `behavioral_evaluation` remains `not_run`. |
 
 ## Atomic mapping for every issue returned by the captured reports
 
@@ -117,11 +117,11 @@ does not imply that the check already exists.
 | `onboarding-friction` | Recommended | vercel.com, gymshark.com | `agent.api.onboarding` | Implemented as bounded unauthenticated health/status response and RFC 9728 challenge observations; no registration/token flow. |
 | `openapi-spec` | Essential | github.com, gymshark.com | `agent.openapi.spec` | Implemented bounded JSON/YAML OpenAPI 3 discovery and parsing when an API/developer surface is linked; candidate live-site evidence remains. |
 | `org-schema-completeness` | Recommended | prosody.chat, github.com, galileo.ai, gymshark.com, parallel.ai, is-optimized.com | `geo.organization`, `geo.entity_links`, `geo.schema_breadth` | Implemented field, sameAs-count and type-breadth checks; truth and entity ownership are not validated. |
-| `pricing-info` | Recommended | gymshark.com | `agent.read.pricing` | Existing linked-pricing observation is partial; no pricing policy inferred. |
+| `pricing-info` | Recommended | gymshark.com | `agent.pricing`, `agent.read.pricing` | Weighted, applicability-aware public pricing/Offer observations using sampled pages; linked-only signals are partial and unavailable pages stay unknown. Commercial accuracy is not verified. |
 | `public-api` | Recommended | galileo.ai, gymshark.com | `agent.api.reachability` | Implemented for up to two public, parameter-free OpenAPI GET operations; no API credentials or mutations. |
 | `public-api-docs` | Recommended | gymshark.com | `agent.developer.docs` | Implemented homepage-link detection for public API documentation. |
 | `rate-limit-headers` | Recommended | vercel.com, github.com, galileo.ai, parallel.ai | `agent.api.rate_limits` | Implemented on safe unauthenticated GET responses; standard RateLimit headers pass, legacy X-RateLimit headers partial. |
-| `redirect-hygiene` | Essential | gymshark.com | `seo.redirect_hygiene` | Existing requested/final URL evidence is partial; chain/markup checks planned. |
+| `redirect-hygiene` | Essential | gymshark.com | `seo.redirect_hygiene` | Implemented bounded final-URL/hop observations, meta-refresh and short-page script redirect signals; no browser JavaScript is executed. |
 | `scoped-permissions` | Essential | vercel.com, gymshark.com | `agent.openapi.scopes`, `agent.oauth.scopes` | Implemented declared OpenAPI OAuth scopes and OAuth `scopes_supported`; no authorization or token exchange. |
 | `sitemap` | Recommended | prosody.chat, is-optimized.com | `seo.sitemap_quality`, `seo.sitemap_freshness` | Implemented bounded validity, same-origin and freshness checks; candidate live-site evidence remains. |
 | `trust-anchors` | Recommended | prosody.chat, galileo.ai, gymshark.com, is-optimized.com | `geo.trust.about`, `geo.trust.contact`, `geo.trust.privacy`, `geo.trust.terms` | Implemented bounded probes for about/contact/privacy/terms; candidate live-site evidence remains. |

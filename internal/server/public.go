@@ -134,6 +134,9 @@ func publicPageText(path, base string) (string, string) {
 }
 
 func (s *Server) publicOpenAPI() map[string]any {
+	problem := func(description string) map[string]any {
+		return map[string]any{"description": description, "content": map[string]any{"text/plain": map[string]any{"schema": map[string]any{"type": "string"}}, "application/problem+json": map[string]any{"schema": map[string]any{"type": "object", "properties": map[string]any{"type": map[string]any{"type": "string"}, "title": map[string]any{"type": "string"}, "status": map[string]any{"type": "integer"}, "detail": map[string]any{"type": "string"}}, "required": []string{"type", "title", "status"}}}}}
+	}
 	response := func(description string) map[string]any {
 		return map[string]any{"description": description, "content": map[string]any{"application/json": map[string]any{"schema": map[string]any{"type": "object"}}}}
 	}
@@ -141,9 +144,9 @@ func (s *Server) publicOpenAPI() map[string]any {
 		return []any{map[string]any{"name": name, "in": "path", "required": true, "schema": map[string]any{"type": "string"}}}
 	}
 	return map[string]any{"openapi": "3.1.0", "info": map[string]any{"title": "is-optimized public audit API", "version": "1.0.0", "description": "Sampled public website audits and evidence reports. No credentials or paid LLM evaluation required."}, "servers": []any{map[string]any{"url": s.cfg.PublicURL}}, "paths": map[string]any{
-		"/api/v1/scans":            map[string]any{"post": map[string]any{"operationId": "createScan", "summary": "Request a public website audit", "requestBody": map[string]any{"required": true, "content": map[string]any{"application/json": map[string]any{"schema": map[string]any{"type": "object", "properties": map[string]any{"domain": map[string]any{"type": "string"}}, "required": []string{"domain"}, "additionalProperties": false}}}}, "responses": map[string]any{"200": response("Cached report"), "202": response("Queued scan with id"), "400": map[string]any{"description": "Invalid input"}, "429": map[string]any{"description": "Rate limited; respect Retry-After"}, "503": map[string]any{"description": "Queue unavailable; retry later"}}}},
-		"/api/v1/scans/{id}":       map[string]any{"get": map[string]any{"operationId": "getScan", "summary": "Retrieve scan state and published report", "parameters": parameter("id"), "responses": map[string]any{"200": response("Scan state or report"), "404": map[string]any{"description": "Scan not found"}}}},
-		"/api/v1/reports/{domain}": map[string]any{"get": map[string]any{"operationId": "getReport", "summary": "Retrieve latest published report by domain", "parameters": parameter("domain"), "responses": map[string]any{"200": response("Published report"), "404": map[string]any{"description": "Report not found"}, "410": map[string]any{"description": "Report expired"}}}},
+		"/api/v1/scans":            map[string]any{"post": map[string]any{"operationId": "createScan", "summary": "Request a public website audit", "requestBody": map[string]any{"required": true, "content": map[string]any{"application/json": map[string]any{"schema": map[string]any{"type": "object", "properties": map[string]any{"domain": map[string]any{"type": "string"}}, "required": []string{"domain"}, "additionalProperties": false}}}}, "responses": map[string]any{"200": response("Cached report"), "202": response("Queued scan with id"), "400": problem("Invalid input"), "429": problem("Rate limited; respect Retry-After"), "503": problem("Queue unavailable; retry later")}}},
+		"/api/v1/scans/{id}":       map[string]any{"get": map[string]any{"operationId": "getScan", "summary": "Retrieve scan state and published report", "parameters": parameter("id"), "responses": map[string]any{"200": response("Scan state or report"), "404": problem("Scan not found")}}},
+		"/api/v1/reports/{domain}": map[string]any{"get": map[string]any{"operationId": "getReport", "summary": "Retrieve latest published report by domain", "parameters": parameter("domain"), "responses": map[string]any{"200": response("Published report"), "404": problem("Report not found"), "410": problem("Report expired")}}},
 		"/healthz":                 map[string]any{"get": map[string]any{"operationId": "health", "summary": "Check process health without starting a scan", "responses": map[string]any{"200": map[string]any{"description": "Process is serving HTTP", "content": map[string]any{"text/plain": map[string]any{"schema": map[string]any{"type": "string"}}}}}}},
 	}}
 }

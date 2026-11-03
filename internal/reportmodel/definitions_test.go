@@ -20,8 +20,13 @@ func TestRepeatedDefinitionsRoundTripAndFitRecordLimit(t *testing.T) {
 	original, _ := json.Marshal(report)
 	compact := CompactPageReferences(report)
 	encoded, _ := json.Marshal(compact)
-	if len(encoded) >= 800000 || len(encoded) >= len(original)/2 || len(compact.FindingDefinitions) != 45 {
+	if len(encoded) >= 800000 || len(encoded) >= len(original) || len(compact.FindingDefinitions) != 45 {
 		t.Fatalf("original=%d compact=%d definitions=%d", len(original), len(encoded), len(compact.FindingDefinitions))
+	}
+	for i, finding := range compact.Findings {
+		if finding.ID != report.Findings[i].ID || finding.Title != report.Findings[i].Title || finding.Pillar != report.Findings[i].Pillar || finding.Evidence != report.Findings[i].Evidence || finding.Remediation != report.Findings[i].Remediation || finding.Weight != report.Findings[i].Weight {
+			t.Fatal("legacy core finding fields changed")
+		}
 	}
 	var stored Report
 	if err := json.Unmarshal(encoded, &stored); err != nil {

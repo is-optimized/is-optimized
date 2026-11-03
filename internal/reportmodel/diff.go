@@ -1,6 +1,9 @@
 package reportmodel
 
-import "sort"
+import (
+	"encoding/json"
+	"sort"
+)
 
 // FindingChange compares two immutable snapshots, not unobserved live behavior.
 type FindingChange struct {
@@ -19,6 +22,7 @@ func WithHistory(current, previous Report) Report {
 		return current
 	}
 	current.PreviousReportID = previous.ID
+	current.Changes, current.ChangesTruncated = nil, false
 	old := map[string]Finding{}
 	for _, f := range ExpandPageReferences(previous).Findings {
 		old[f.ID+"\x00"+f.URL] = f
@@ -42,11 +46,18 @@ func WithHistory(current, previous Report) Report {
 		}
 		return changes[i].URL < changes[j].URL
 	})
-	if len(changes) > 100 {
-		current.ChangesTruncated = true
-		changes = changes[:100]
+	// Bound serialized history as well as row count; URLs and escaped evidence
+	// can otherwise crowd out the report's existing durable record budget.
+	bytes := 2
+	for _, change := range changes {
+		encoded, _ := json.Marshal(change)
+		if len(current.Changes) == 100 || bytes+len(encoded)+1 > 48000 {
+			current.ChangesTruncated = true
+			break
+		}
+		current.Changes = append(current.Changes, change)
+		bytes += len(encoded) + 1
 	}
-	current.Changes = changes
 	return current
 }
 
