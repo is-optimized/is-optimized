@@ -1,0 +1,14 @@
+{
+  "Description": "Sire Run, Inc. operates is-optimized.com, a free website audit service. Visitors who explicitly send a prepared report request from their own mobile phone receive one SMS containing the requested PDF report link. The full HTML report is available without SMS. This campaign sends requested reports only, with no recurring messages, promotions or calls.",
+  "MessageFlow": "Prelaunch flow at https://is-optimized.com. SMS is disabled on production pending approval. A visitor scans a domain and can view the full HTML report without a phone number. To request text delivery, they enter the mobile number they will send from. The page states: \"By sending the prepared text message, you request one SMS from Sire Run, Inc. containing a link to your free website audit report. Message and data rates may apply. Reply STOP to opt out or HELP for help. SMS is optional; you can view your full report online without providing a phone number. Privacy Policy and Terms & Conditions apply.\" There is no marketing or calling consent. Text me the report prepares an SMS composer; the visitor must tap Send to request delivery. The inbound request says \"Hi, please send me the free website audit report for [domain].\" followed by an expiring report code. The app validates the sender and code and replies once with the requested PDF link. No recurring enrollment. Corrected prelaunch screenshots supersede the October 30 evidence: https://raw.githubusercontent.com/is-optimized/is-optimized/3c98d3c/docs/twilio-campaign-evidence-20261106/01-consent-flow.png https://raw.githubusercontent.com/is-optimized/is-optimized/3c98d3c/docs/twilio-campaign-evidence-20261106/02-text-handoff.png Privacy: https://sire.run/privacy/ Terms: https://sire.run/terms/",
+  "MessageSamples": [
+    "Sire Run, Inc.: Here’s your free website audit report: https://is-optimized.com/reports/[report_id]/pdf. Reply STOP to opt out.",
+    "Sire Run, Inc.: Here’s your free website audit report: https://is-optimized.com/reports/[another_report_id]/pdf. Reply STOP to opt out."
+  ],
+  "HasEmbeddedLinks": "true",
+  "HasEmbeddedPhone": "false",
+  "DirectLending": "false",
+  "AgeGated": "false",
+  "PrivacyPolicyUrl": "https://sire.run/privacy/",
+  "TermsAndConditionsUrl": "https://sire.run/terms/"
+}

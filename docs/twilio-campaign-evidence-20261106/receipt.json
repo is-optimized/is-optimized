@@ -1,0 +1,14 @@
+{
+  "attempted_at": "2026-11-07T02:42:18.759203+00:00",
+  "http_status": 200,
+  "compliance_sid": "QE2c6890da8086d771620e9b13fadeba0b",
+  "messaging_service_sid": "MGacb9acea0cd89b77d5be71490912b3c3",
+  "campaign_status": "IN_PROGRESS",
+  "errors": [],
+  "verified_with_followup_get": true,
+  "description_matches": true,
+  "message_flow_matches": true,
+  "evidence_source_commit": "3c98d3c",
+  "production_sms_enabled": false,
+  "sms_sent": false
+}

@@ -1,3 +1,11 @@
+# Current status — resubmitted 2026-11-06
+
+The notes below are historical. The same compliance resource `QE2c6890da8086d771620e9b13fadeba0b` was updated in place after rejection 30896. HTTP 200 and a follow-up GET confirmed `IN_PROGRESS` with no errors. This is review submission, not approval.
+
+The report-only source change removes marketing/calling consent and ignores legacy marketing flags. Disclosure version: `2026-11-06-report-only-v1`. Updated description, message flow, samples, hosted prelaunch screenshots, and receipt are in [the replacement evidence folder](twilio-campaign-evidence-20261106/README.md). Those screenshots supersede the October 30 submission evidence. Production SMS remains disabled; source is in draft PR #18 and is not deployed. Existing cloud configuration must use the new disclosure/version before SMS enablement.
+
+---
+
 # Twilio campaign record
 
 **Status:** submitted; in review as of 2026-10-31. SMS remains disabled in production.
