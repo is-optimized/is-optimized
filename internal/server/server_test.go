@@ -52,7 +52,7 @@ func setup(t *testing.T) (*Server, *fakeScanner, *fakeSender) {
 	}
 	scan := &fakeScanner{}
 	sender := &fakeSender{}
-	s, e := New(db, scan, sender, Config{PublicURL: "https://audit.example", SMS: true, TwilioAccount: "ACtest", TwilioToken: "test-only", TwilioFrom: "+15555550100", Disclosure: "Test disclosure", DisclosureVersion: "fixture-v1", SMSWording: "REPORT {token}"})
+	s, e := New(db, scan, sender, Config{PublicURL: "https://audit.example", SMS: true, TwilioAccount: "ACtest", TwilioToken: "test-only", TwilioFrom: "+15555550100", Disclosure: ApprovedDisclosure, DisclosureVersion: ApprovedDisclosureVersion, SMSWording: "REPORT {token}"})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -405,5 +405,20 @@ func TestSMSIntendedNumberBinding(t *testing.T) {
 	}
 	if req.State != "pending" || req.Sender != "+15555550123" {
 		t.Fatal(req.State)
+	}
+}
+
+func TestSMSRejectsStaleDisclosureConfiguration(t *testing.T) {
+	s, _, _ := setup(t)
+	for _, field := range []string{"disclosure", "version"} {
+		cfg := s.cfg
+		if field == "disclosure" {
+			cfg.Disclosure = "I agree to marketing calls and texts"
+		} else {
+			cfg.DisclosureVersion = "2026-10-31-v1"
+		}
+		if _, err := New(s.db, s.scan, s.sender, cfg); err == nil {
+			t.Fatalf("SMS accepted stale %s", field)
+		}
 	}
 }
