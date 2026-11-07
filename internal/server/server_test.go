@@ -255,7 +255,7 @@ func TestApprovedSMSHandoff(t *testing.T) {
 	s, _, sender := setup(t)
 	s.cfg.SMSWording = ApprovedRequestWording + "\nReport code: {token}"
 	key := completed(t, s)
-	payload, _ := json.Marshal(map[string]any{"report_id": key, "phone": "+15555550123", "marketing": false})
+	payload, _ := json.Marshal(map[string]any{"report_id": key, "phone": "+15555550123", "marketing": true})
 	w := perform(s, "POST", "/api/v1/report-requests", string(payload))
 	if w.Code != 201 {
 		t.Fatal(w.Code, w.Body.String())
