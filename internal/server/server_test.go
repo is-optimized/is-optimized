@@ -316,10 +316,14 @@ func TestSMSDisabledBoundary(t *testing.T) {
 
 func TestPhoneFirstHTMLHandoff(t *testing.T) {
 	s, _, _ := setup(t)
+	s.cfg.Disclosure = ApprovedDisclosure
 	w := perform(s, "GET", "/", "")
 	body := w.Body.String()
 	if w.Code != 200 || !strings.Contains(body, `id="phone"`) || !strings.Contains(body, `id="text" class="sms-primary"`) || !strings.Contains(body, `id="view" class="view-report-link"`) {
 		t.Fatalf("phone-first report delivery page missing: status %d", w.Code)
+	}
+	if strings.Contains(body, `id="consent"`) || strings.Contains(body, "AI services for your business") || !strings.Contains(body, "you request one SMS") || !strings.Contains(body, "Reply STOP to opt out or HELP for help") {
+		t.Fatal("report-only opt-in must show the transactional disclosure without marketing consent")
 	}
 	if strings.Contains(body, `id="name"`) || strings.Contains(body, `byID('name')`) {
 		t.Fatal("phone-only SMS request still exposes a name field")
