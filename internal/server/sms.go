@@ -16,8 +16,8 @@ import (
 )
 
 // Approved customer-facing copy. Correlation is appended internally, never supplied by a visitor.
-const ApprovedDisclosure = "By entering your mobile number and sending the text message below, you agree that Sire Run, Inc. may contact you at that number by phone call, text message, and artificial or prerecorded voice (including voicemail drops) about AI services for your business. Consent is not required to receive the free website audit report or to purchase anything. Message and data rates may apply. Reply STOP to any text to opt out."
-const ApprovedDisclosureVersion = "2026-10-31-v1"
+const ApprovedDisclosure = "By sending the prepared text message, you request one SMS from Sire Run, Inc. containing a link to your free website audit report. Message and data rates may apply. Reply STOP to opt out or HELP for help. SMS is optional; you can view your full report online without providing a phone number. Privacy Policy and Terms & Conditions apply."
+const ApprovedDisclosureVersion = "2026-11-06-report-only-v1"
 const ApprovedRequestWording = "Hi, please send me the free website audit report for {domain}."
 
 var phonePattern = regexp.MustCompile(`^\+[1-9][0-9]{7,14}$`)
@@ -30,8 +30,9 @@ func (s *Server) requestReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		ReportID  string `json:"report_id"`
+		// Accepted for older clients; this campaign never records marketing permission.
 		Marketing bool   `json:"marketing"`
+		ReportID  string `json:"report_id"`
 		Phone     string `json:"phone"`
 	}
 	if decode(r, &in) != nil {
@@ -56,7 +57,7 @@ func (s *Server) requestReport(w http.ResponseWriter, r *http.Request) {
 	}
 	wording := s.cfg.SMSWording
 	wording = strings.ReplaceAll(wording, "{domain}", snapshot.Report.Domain)
-	req := Request{IntendedPhone: in.Phone, Token: id(), ReportID: in.ReportID, Disclosure: s.cfg.Disclosure, DisclosureVersion: s.cfg.DisclosureVersion, Wording: wording, Marketing: in.Marketing, Created: time.Now().UTC(), Expires: time.Now().Add(30 * time.Minute), State: "unconsumed"}
+	req := Request{IntendedPhone: in.Phone, Token: id(), ReportID: in.ReportID, Disclosure: s.cfg.Disclosure, DisclosureVersion: s.cfg.DisclosureVersion, Wording: wording, Marketing: false, Created: time.Now().UTC(), Expires: time.Now().Add(30 * time.Minute), State: "unconsumed"}
 	if s.db.Update(r.Context(), "request_"+req.Token, func(raw json.RawMessage) (any, error) {
 		if len(raw) > 0 {
 			return nil, errConflict
