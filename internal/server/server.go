@@ -113,6 +113,9 @@ func New(db store.Store, scan Scanner, sender messaging.Sender, cfg Config) (*Se
 	if cfg.SMS && (u.Scheme != "https" || cfg.TwilioAccount == "" || cfg.TwilioToken == "" || cfg.TwilioFrom == "" || cfg.Disclosure == "" || cfg.DisclosureVersion == "" || sender == nil) {
 		return nil, errors.New("SMS needs HTTPS, provider configuration, versioned disclosure, and sender")
 	}
+	if cfg.SMS && (cfg.Disclosure != ApprovedDisclosure || cfg.DisclosureVersion != ApprovedDisclosureVersion) {
+		return nil, errors.New("SMS requires the current report-only disclosure and version")
+	}
 	s := &Server{db: db, scan: scan, sender: sender, cfg: cfg, mux: http.NewServeMux(), slots: make(chan struct{}, scanWorkers), rates: map[string][]time.Time{}}
 	s.scanWake = make(chan struct{}, 1)
 	s.messageWake = make(chan struct{}, 1)
